@@ -12,6 +12,8 @@ Structured dropout (e.g. DropBlock / DropChannel) is not a new concept. However,
 
 ## Goals
 
+Core:
+
 - Implement structured dropout + sparse matrix multiplication in Triton (or CUDA if necessary). (Both forward and backward pass)
 - Verify that the implementation's correctness and benchmark the promised speedup.
 - Test the implementation on small/medium-sized models (e.g. GPT-2 small) and compare the speed and final performance with the standard dropout (baseline).
@@ -19,3 +21,17 @@ Structured dropout (e.g. DropBlock / DropChannel) is not a new concept. However,
 Extensions:
 - Implement structured dropout + sparse convolution and benchmark the speedup.
 - Test the implementation on vision models (e.g. ResNet-50).
+
+## Potential models
+
+- T5: Uses dropout in the middle of the MLP layers.
+- Many models apply dropout after embedding layer.
+- Can focus on the pre-QKV and pre-MLP dropout layers.
+
+$$
+\begin{align*}
+Y &= X W \\
+\frac{\partial L}{\partial X} &= \frac{\partial L}{\partial Y} W^T \\
+\frac{\partial L}{\partial W} &= X^T \frac{\partial L}{\partial Y} \\
+\end{align*}
+$$

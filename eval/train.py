@@ -25,7 +25,7 @@ class BasicNet(nn.Module):
             case "vanilla":
                 dropout = partial(nn.Dropout, p=0.1)
             case "blockwise":
-                dropout = partial(BlockwiseDropout, p=0.1)
+                dropout = partial(BlockwiseDropout, p=0.1, block_size=(16, 16))
             case "none":
                 dropout = nn.Identity
             case _:

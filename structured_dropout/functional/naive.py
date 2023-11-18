@@ -4,7 +4,7 @@ import torch.types
 
 from structured_dropout.types import size
 
-from .utils import dropout_mask
+from .utils import blockwise_dropout_mask, structured_dropout_mask
 
 
 def blockwise_dropout(
@@ -15,19 +15,28 @@ def blockwise_dropout(
 
     x = input.clone()
     x[mask] = 0
-    x[~mask] *= 1 / (1 - p)
+    x[~mask] /= 1 - p
 
     return x
 
 
-def blockwise_dropout_matmul(
+def structured_blockwise_dropout_matmul(
     input: torch.Tensor,
+    weight: torch.Tensor,
     block_size: size,
     p: float,
-    weight: torch.Tensor,
-    bias: torch.Tensor | None = None,
 ):
-    mask = dropout_mask(input, block_size, p)
-    mask = torch.from_numpy(mask).to(input.device)
+    mask = structured_dropout_mask(input, block_size, p).to(input.device)
     input = blockwise_dropout(input, mask, block_size, p)
-    return F.linear(input, weight, bias)
+    return input @ weight
+
+
+def blockwise_dropout_matmul(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    block_size: size,
+    p: float,
+):
+    mask = blockwise_dropout_mask(input, block_size, p).to(input.device)
+    input = blockwise_dropout(input, mask, block_size, p)
+    return input @ weight

@@ -1,1 +1,1 @@
-from .naive import blockwise_dropout_matmul
+from .naive import structured_blockwise_dropout_matmul

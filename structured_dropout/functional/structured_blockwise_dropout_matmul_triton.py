@@ -4,17 +4,11 @@ import torch.types
 import triton
 import triton.language as tl
 
-from .utils import dropout_mask, mask_to_increment_table
-
-
-@triton.jit
-def threadblock_swizzle(pid, grid_m, grid_n, GROUP_M: tl.constexpr):
-    width = GROUP_M * grid_n
-    group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-    pid_m = group_id * GROUP_M + (pid % group_size)
-    pid_n = (pid % width) // (group_size)
-    return pid_m, pid_n
+from structured_dropout.functional.utils import (
+    structured_dropout_mask,
+    structured_mask_to_increment_table,
+    threadblock_swizzle,
+)
 
 
 @triton.autotune(
@@ -29,7 +23,7 @@ def threadblock_swizzle(pid, grid_m, grid_n, GROUP_M: tl.constexpr):
     }
 )
 @triton.jit
-def blockwise_dropout_matmul_kernel(
+def structured_blockwise_dropout_matmul_kernel(
     # Pointers to matrices
     a_ptr: tl.tensor,
     b_ptr: tl.tensor,
@@ -124,7 +118,7 @@ def blockwise_dropout_matmul_kernel(
         tl.store(c_block_ptr, c, boundary_check=(0, 1))
 
 
-def matmul(a: torch.Tensor, b: torch.Tensor):
+def structured_blockwise_dropout_matmul(a: torch.Tensor, b: torch.Tensor):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -141,11 +135,11 @@ def matmul(a: torch.Tensor, b: torch.Tensor):
     def grid(META):
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
 
-    mask = dropout_mask(a, (BLOCK_M, BLOCK_K), p=0.2)
-    table = mask_to_increment_table(mask, BLOCK_K)
+    mask = structured_dropout_mask(a, (BLOCK_M, BLOCK_K), p=0.2)
+    table = structured_mask_to_increment_table(mask, BLOCK_K)
     table = torch.from_numpy(table).to(a.device)
 
-    blockwise_dropout_matmul_kernel[grid](
+    structured_blockwise_dropout_matmul_kernel[grid](
         a,
         b,
         c,
@@ -169,43 +163,6 @@ def matmul(a: torch.Tensor, b: torch.Tensor):
     return c
 
 
-@triton.testing.perf_report(
-    triton.testing.Benchmark(
-        x_names=["M", "N", "K"],  # Argument names to use as an x-axis for the plot
-        x_vals=[
-            128 * i for i in range(2, 33)
-        ],  # Different possible values for `x_name`
-        line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
-        # Possible values for `line_arg`
-        line_vals=["cublas", "triton"],
-        # Label name for the lines
-        line_names=["cuBLAS", "Triton"],
-        # Line styles
-        styles=[("green", "-"), ("blue", "-")],
-        ylabel="TFLOPS",  # Label name for the y-axis
-        plot_name="matmul-performance",  # Name for the plot, used also as a file name for saving the plot.
-        args={},
-    )
-)
-def benchmark(M, N, K, provider):
-    a = torch.randn((M, K), device="cuda", dtype=torch.float16)
-    b = torch.randn((K, N), device="cuda", dtype=torch.float16)
-    quantiles = [0.5, 0.2, 0.8]
-    if provider == "cublas":
-        ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: torch.matmul(a, b), quantiles=quantiles
-        )
-    elif provider == "triton":
-        ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: matmul(a, b), quantiles=quantiles
-        )
-    else:
-        raise ValueError()
-
-    perf = lambda ms: 2 * M * N * K * 1e-12 / (ms * 1e-3)
-    return perf(ms), perf(max_ms), perf(min_ms)
-
-
 if __name__ == "__main__":
     torch.manual_seed(0)
     np.random.seed(0)
@@ -213,7 +170,7 @@ if __name__ == "__main__":
     a = torch.randn((512, 512), device="cuda", dtype=torch.float16)
     b = torch.randn((512, 512), device="cuda", dtype=torch.float16)
 
-    triton_output = matmul(a, b)
+    triton_output = structured_blockwise_dropout_matmul(a, b)
     torch_output = torch.matmul(a, b)
 
     print(f"{triton_output=}")
@@ -223,5 +180,36 @@ if __name__ == "__main__":
         print("✅ Triton and Torch match")
     else:
         print("❌ Triton and Torch differ")
+
+    @triton.testing.perf_report(
+        triton.testing.Benchmark(
+            x_names=["M", "N", "K"],
+            x_vals=[128 * i for i in range(2, 33)],
+            line_arg="provider",
+            line_vals=["cublas", "triton"],
+            line_names=["cuBLAS", "Triton"],
+            styles=[("green", "-"), ("blue", "-")],
+            ylabel="TFLOPS",
+            plot_name="matmul-performance",
+            args={},
+        )
+    )
+    def benchmark(M, N, K, provider):
+        a = torch.randn((M, K), device="cuda", dtype=torch.float16)
+        b = torch.randn((K, N), device="cuda", dtype=torch.float16)
+        quantiles = [0.5, 0.05, 0.95]
+        if provider == "cublas":
+            ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: torch.matmul(a, b), quantiles=quantiles
+            )
+        elif provider == "triton":
+            ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: structured_blockwise_dropout_matmul(a, b), quantiles=quantiles
+            )
+        else:
+            raise ValueError()
+
+        perf = lambda ms: 2 * M * N * K * 1e-12 / (ms * 1e-3)
+        return perf(ms), perf(max_ms), perf(min_ms)
 
     benchmark.run(show_plots=True, print_data=True)

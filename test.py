@@ -14,17 +14,17 @@ from structured_dropout.functional.naive import (
 
 def f_triton(A: torch.Tensor, B: torch.Tensor):
     C = blockwise_dropout_matmul(A, B, (64, 64), 0.5)
-    C.backward(torch.randn_like(C))
+    C.backward(torch.zeros_like(C))
 
 
 def f_naive(A: torch.Tensor, B: torch.Tensor):
     C = naive_blockwise_dropout_matmul(A, B, (64, 64), 0.5)
-    C.backward(torch.randn_like(C))
+    C.backward(torch.zeros_like(C))
 
 
 def f_dense(A: torch.Tensor, B: torch.Tensor):
     C = A @ B
-    C.backward(torch.randn_like(C))
+    C.backward(torch.zeros_like(C))
 
 
 @triton.testing.perf_report(
@@ -60,4 +60,4 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     np.random.seed(0)
 
-    benchmark.run(show_plots=True, print_data=True)
+    benchmark.run(save_path="./logs", show_plots=True, print_data=True)

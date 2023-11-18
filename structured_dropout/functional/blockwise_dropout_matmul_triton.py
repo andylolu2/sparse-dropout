@@ -216,8 +216,6 @@ def blockwise_sdd_matmul_kernel(
     pid_m = tl.load(table_ptr + pid * stride_tw + 0 * stride_th)
     pid_n = tl.load(table_ptr + pid * stride_tw + 1 * stride_th)
 
-    # tl.device_print("pid_m = %d, pid_n = %d\n", pid_m, pid_n)
-
     # Create block pointers for blocks of A and B.
     a_block_ptr = tl.make_block_ptr(
         base=a_ptr,
@@ -273,7 +271,7 @@ def blockwise_sdd_matmul(
     B: torch.Tensor,
     mask: torch.Tensor,
     BLOCK_M: int,
-    BLOCK_K: int,
+    BLOCK_N: int,
     scale: float = 1.0,
 ):
     """Compute C (sparse) = scale * A (dense) x B (dense)."""
@@ -286,12 +284,11 @@ def blockwise_sdd_matmul(
     K, N = B.shape
 
     # Allocate output
-    c = torch.empty((M, N), device=A.device, dtype=A.dtype)
+    c = torch.zeros((M, N), device=A.device, dtype=A.dtype)
+    table = torch.nonzero(~mask, as_tuple=False).to(A.device)
 
     def grid(META):
-        return (torch.sum(mask).item(),)
-
-    table = torch.nonzero(mask, as_tuple=False).to(A.device)
+        return (len(table),)
 
     blockwise_sdd_matmul_kernel[grid](
         A,
@@ -310,7 +307,7 @@ def blockwise_sdd_matmul(
         table.stride(0),
         table.stride(1),
         BLOCK_M,
-        BLOCK_K,
+        BLOCK_N,
         scale,
     )
     return c
@@ -351,7 +348,7 @@ class BlockwiseDropoutMatmul(torch.autograd.Function):
 
         # dx (MK sparse) = dy (MN dense) x w^T (KN dense)
         grad_input = blockwise_sdd_matmul(
-            grad_output, weight, mask, BLOCK_M, BLOCK_K, scale=1 / (1 - p)
+            grad_output, weight.T, mask, BLOCK_M, BLOCK_K, scale=1 / (1 - p)
         )
 
         # dw (KN dense) = x^T (KM sparse) x dy (MN dense)

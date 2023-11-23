@@ -4,12 +4,12 @@ import torch.types
 import triton
 import triton.language as tl
 
-from structured_dropout.functional.utils import (
+from flash_dropout.functional.utils import (
     blockwise_dropout_mask,
     mask_to_increment_table,
     threadblock_swizzle,
 )
-from structured_dropout.types import size
+from flash_dropout.types import size
 
 
 @triton.autotune(

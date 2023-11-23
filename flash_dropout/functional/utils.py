@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-from structured_dropout.types import size
+from flash_dropout.types import size
 
 
 def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> torch.Tensor:
@@ -70,9 +70,7 @@ def mask_to_increment_table(
     return table, row_indices, row_widths
 
 
-def structured_dropout_mask(
-    x: torch.Tensor, block_size: size, p: float
-) -> torch.Tensor:
+def flash_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> torch.Tensor:
     """Creates a blockwise dropout mask for a matrix.
 
     mask[i, j] = True means block (i, j) is dropped.

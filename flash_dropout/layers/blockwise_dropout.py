@@ -2,7 +2,7 @@ import torch
 import torch.types
 from torch import nn
 
-import structured_dropout.functional as F
+import flash_dropout.functional as F
 
 
 class BlockwiseDropout(nn.Module):

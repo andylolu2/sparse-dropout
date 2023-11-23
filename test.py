@@ -4,10 +4,10 @@ import torch.types
 import triton
 import triton.testing
 
-from structured_dropout.functional.blockwise_dropout_matmul_triton import (
+from flash_dropout.functional.blockwise_dropout_matmul_triton import (
     blockwise_dropout_matmul,
 )
-from structured_dropout.functional.naive import (
+from flash_dropout.functional.naive import (
     blockwise_dropout_matmul as naive_blockwise_dropout_matmul,
 )
 

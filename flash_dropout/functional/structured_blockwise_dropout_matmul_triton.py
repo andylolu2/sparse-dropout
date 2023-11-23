@@ -4,8 +4,8 @@ import torch.types
 import triton
 import triton.language as tl
 
-from structured_dropout.functional.utils import (
-    structured_dropout_mask,
+from flash_dropout.functional.utils import (
+    flash_dropout_mask,
     structured_mask_to_increment_table,
     threadblock_swizzle,
 )
@@ -135,7 +135,7 @@ def structured_blockwise_dropout_matmul(a: torch.Tensor, b: torch.Tensor):
     def grid(META):
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
 
-    mask = structured_dropout_mask(a, (BLOCK_M, BLOCK_K), p=0.2)
+    mask = flash_dropout_mask(a, (BLOCK_M, BLOCK_K), p=0.2)
     table = structured_mask_to_increment_table(mask, BLOCK_K)
     table = torch.from_numpy(table).to(a.device)
 

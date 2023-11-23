@@ -2,9 +2,9 @@ import torch
 import torch.nn.functional as F
 import torch.types
 
-from structured_dropout.types import size
+from flash_dropout.types import size
 
-from .utils import blockwise_dropout_mask, structured_dropout_mask
+from .utils import blockwise_dropout_mask, flash_dropout_mask
 
 
 def blockwise_dropout(
@@ -26,7 +26,7 @@ def structured_blockwise_dropout_matmul(
     block_size: size,
     p: float,
 ):
-    mask = structured_dropout_mask(input, block_size, p).to(input.device)
+    mask = flash_dropout_mask(input, block_size, p).to(input.device)
     input = blockwise_dropout(input, mask, block_size, p)
     return input @ weight
 

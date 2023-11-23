@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
 
-from structured_dropout.layers import BlockwiseDropout
+from flash_dropout.layers import BlockwiseDropout
 
 
 class BasicNet(nn.Module):

@@ -1,4 +1,5 @@
-import numpy as np
+from math import ceil
+
 import torch
 import torch.nn.functional as F
 import triton
@@ -13,7 +14,7 @@ def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> torch
     Returns a mask tensor on the *CPU*.
     """
     *b, m, n = x.shape
-    mask = torch.rand(*b, m // block_size[0], n // block_size[1]) < p
+    mask = torch.rand(*b, ceil(m / block_size[0]), ceil(n / block_size[1])) < p
     return mask
 
 
@@ -70,7 +71,9 @@ def mask_to_increment_table(
     return table, row_indices, row_widths
 
 
-def flash_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> torch.Tensor:
+def structured_dropout_mask(
+    x: torch.Tensor, block_size: size, p: float
+) -> torch.Tensor:
     """Creates a blockwise dropout mask for a matrix.
 
     mask[i, j] = True means block (i, j) is dropped.
@@ -79,7 +82,7 @@ def flash_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> torch.Ten
     """
     assert x.ndim == 2
 
-    num_blocks = (x.shape[0] // block_size[0], x.shape[1] // block_size[1])
+    num_blocks = (ceil(x.shape[0] / block_size[0]), ceil(x.shape[1] / block_size[1]))
     num_blocks_not_masked = round(num_blocks[1] * (1 - p))
 
     not_masked_indices = torch.argsort(torch.rand(*num_blocks), dim=1)

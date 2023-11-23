@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.types
 import triton
@@ -25,33 +24,20 @@ from flash_dropout.types import size
 )
 @triton.jit
 def blockwise_dsd_matmul_kernel(
-    # Pointers to matrices
-    a_ptr: tl.tensor,  # (M K) sparse
-    b_ptr: tl.tensor,  # (K N) dense
-    c_ptr: tl.tensor,  # (M N) dense
-    table_ptr: tl.tensor,  # (W) non-zero table for A
-    header_ptr: tl.tensor,  # (M//BLOCK_M H=2) header for A
-    # Matrix dimensions
-    M: tl.constexpr,
-    N: tl.constexpr,
-    K: tl.constexpr,
-    # Strides
-    stride_am,
-    stride_ak,
-    stride_bk,
-    stride_bn,
-    stride_cm,
-    stride_cn,
-    stride_t,
-    stride_hm,
-    stride_hw,
-    BLOCK_M: tl.constexpr,
-    BLOCK_K: tl.constexpr,
+    # fmt: off
+    # Tensors
+    a_ptr, stride_am, stride_ak,
+    b_ptr, stride_bk, stride_bn,
+    c_ptr, stride_cm, stride_cn,
+    table_ptr, stride_t, 
+    header_ptr, stride_hm, stride_hw,
+    # Other parameters
+    M, N, K,
+    BLOCK_M: tl.constexpr, BLOCK_K: tl.constexpr,
     scale: tl.constexpr,
     # Meta-parameters
-    BLOCK_N: tl.constexpr,
-    GROUP_M: tl.constexpr,
-    EVEN_K: tl.constexpr,
+    BLOCK_N: tl.constexpr, GROUP_M: tl.constexpr, EVEN_K: tl.constexpr,
+    # fmt: on
 ):
     # Threadblock swizzling to improve L2 cache hit rate.
     pid = tl.program_id(axis=0)
@@ -101,7 +87,7 @@ def blockwise_dsd_matmul_kernel(
         acc += tl.dot(a, b)
         table_ptr += 1
     acc *= scale
-    c = acc.to(tl.float16)
+    c = acc.to(c_ptr.dtype.element_ty)
 
     # Store output
     c_block_ptr = tl.make_block_ptr(
@@ -136,7 +122,7 @@ def blockwise_dsd_matmul(
     K, N = B.shape
 
     # Allocate output
-    c = torch.empty((M, N), device=A.device, dtype=A.dtype)
+    C = torch.zeros((M, N), device=A.device, dtype=A.dtype)
 
     def grid(META):
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, META["BLOCK_N"]),)
@@ -148,28 +134,18 @@ def blockwise_dsd_matmul(
     header = torch.stack((offsets, widths), dim=1).to(A.device)
 
     blockwise_dsd_matmul_kernel[grid](
-        A,
-        B,
-        c,
-        table,
-        header,
-        M,
-        N,
-        K,
-        A.stride(0),
-        A.stride(1),
-        B.stride(0),
-        B.stride(1),
-        c.stride(0),
-        c.stride(1),
-        table.stride(0),
-        header.stride(0),
-        header.stride(1),
-        BLOCK_M,
-        BLOCK_K,
+        # fmt: off
+        A, A.stride(0), A.stride(1),
+        B, B.stride(0), B.stride(1),
+        C, C.stride(0), C.stride(1),
+        table, table.stride(0),
+        header, header.stride(0), header.stride(1),
+        M, N, K,
+        BLOCK_M, BLOCK_K,
         scale,
+        # fmt: on
     )
-    return c
+    return C
 
 
 @triton.autotune(
@@ -187,30 +163,19 @@ def blockwise_dsd_matmul(
 )
 @triton.jit
 def blockwise_sdd_matmul_kernel(
-    # Pointers to matrices
-    a_ptr: tl.tensor,  # (M K) dense
-    b_ptr: tl.tensor,  # (K N) dense
-    c_ptr: tl.tensor,  # (M N) sparse
-    table_ptr: tl.tensor,  # (W H=2) non-zero table for C
-    # Matrix dimensions
-    M: tl.constexpr,
-    N: tl.constexpr,
-    K: tl.constexpr,
-    # Strides
-    stride_am,
-    stride_ak,
-    stride_bk,
-    stride_bn,
-    stride_cm,
-    stride_cn,
-    stride_tw,
-    stride_th,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    scale: tl.constexpr,
+    # fmt: off
+    # Tensors
+    a_ptr, stride_am, stride_ak,
+    b_ptr, stride_bk, stride_bn,
+    c_ptr, stride_cm, stride_cn,
+    table_ptr, stride_tw, stride_th,
+    # Other parameters
+    M, N, K,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+    scale,
     # Meta-parameters
-    BLOCK_K: tl.constexpr,
-    EVEN_K: tl.constexpr,
+    BLOCK_K: tl.constexpr, EVEN_K: tl.constexpr,
+    # fmt: on
 ):
     pid = tl.program_id(axis=0)
     pid_m = tl.load(table_ptr + pid * stride_tw + 0 * stride_th)
@@ -249,7 +214,7 @@ def blockwise_sdd_matmul_kernel(
 
         acc += tl.dot(a, b)
     acc *= scale
-    c = acc.to(tl.float16)
+    c = acc.to(c_ptr.dtype.element_ty)
 
     # Store output
     c_block_ptr = tl.make_block_ptr(
@@ -284,33 +249,24 @@ def blockwise_sdd_matmul(
     K, N = B.shape
 
     # Allocate output
-    c = torch.zeros((M, N), device=A.device, dtype=A.dtype)
+    C = torch.zeros((M, N), device=A.device, dtype=A.dtype)
     table = torch.nonzero(~mask, as_tuple=False).to(A.device)
 
     def grid(META):
         return (len(table),)
 
     blockwise_sdd_matmul_kernel[grid](
-        A,
-        B,
-        c,
-        table,
-        M,
-        N,
-        K,
-        A.stride(0),
-        A.stride(1),
-        B.stride(0),
-        B.stride(1),
-        c.stride(0),
-        c.stride(1),
-        table.stride(0),
-        table.stride(1),
-        BLOCK_M,
-        BLOCK_N,
+        # fmt: off
+        A, A.stride(0), A.stride(1),
+        B, B.stride(0), B.stride(1),
+        C, C.stride(0), C.stride(1),
+        table, table.stride(0), table.stride(1),
+        M, N, K,
+        BLOCK_M, BLOCK_N,
         scale,
+        # fmt: on
     )
-    return c
+    return C
 
 
 class BlockwiseDropoutMatmul(torch.autograd.Function):
@@ -322,6 +278,8 @@ class BlockwiseDropoutMatmul(torch.autograd.Function):
         block_size: size,
         p: float,
     ):
+        assert 0 <= p < 1, "Dropout probability must be in [0, 1)"
+
         BLOCK_M, BLOCK_K = block_size
         mask = blockwise_dropout_mask(input, (BLOCK_M, BLOCK_K), p=p)
 

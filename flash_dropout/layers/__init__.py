@@ -1,1 +1,1 @@
-from .blockwise_dropout import BlockwiseDropout
+from .dropout_mm import DropoutMM

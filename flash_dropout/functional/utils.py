@@ -38,9 +38,9 @@ def mask_to_increment_table(
     Example:
         BLOCK_K = 16
         mask = [
-            [1, 0, 0, 1, 0],
             [0, 1, 1, 0, 1],
-            [1, 0, 1, 0, 0],
+            [1, 0, 0, 1, 0],
+            [0, 1, 0, 1, 1],
         ]
 
         offsets = [

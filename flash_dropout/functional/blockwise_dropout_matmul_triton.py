@@ -80,12 +80,12 @@ def blockwise_dsd_matmul_kernel(
         if EVEN_K:
             a = tl.load(a_block_ptr)
             b = tl.load(b_block_ptr)
-        else:  # Apply boundary checks
-            a = tl.load(a_block_ptr, boundary_check=(0, 1))
-            b = tl.load(b_block_ptr, boundary_check=(0, 1))
+        else:  # Apply boundary checks on K
+            a = tl.load(a_block_ptr, boundary_check=(1,))
+            b = tl.load(b_block_ptr, boundary_check=(0,))
 
         acc += tl.dot(a, b)
-        table_ptr += 1
+        table_ptr += 1 * stride_t
     acc *= scale
     c = acc.to(c_ptr.dtype.element_ty)
 
@@ -98,10 +98,7 @@ def blockwise_dsd_matmul_kernel(
         block_shape=(BLOCK_M, BLOCK_N),
         order=(1, 0),
     )
-    if EVEN_K:
-        tl.store(c_block_ptr, c)
-    else:
-        tl.store(c_block_ptr, c, boundary_check=(0, 1))
+    tl.store(c_block_ptr, c, boundary_check=(0, 1))
 
 
 def blockwise_dsd_matmul(
@@ -116,8 +113,9 @@ def blockwise_dsd_matmul(
 
     # Check constraints
     assert A.shape[1] == B.shape[0], "Incompatible dimensions"
-    # assert A.is_contiguous(), "Matrix A must be contiguous"
-    # assert B.is_contiguous(), "Matrix B must be contiguous"
+
+    # A = A.contiguous()
+    # B = B.contiguous()
     M, K = A.shape
     K, N = B.shape
 
@@ -206,8 +204,8 @@ def blockwise_sdd_matmul_kernel(
             a = tl.load(a_block_ptr)
             b = tl.load(b_block_ptr)
         else:  # Apply boundary checks
-            a = tl.load(a_block_ptr, boundary_check=(0, 1))
-            b = tl.load(b_block_ptr, boundary_check=(0, 1))
+            a = tl.load(a_block_ptr, boundary_check=(1,))
+            b = tl.load(b_block_ptr, boundary_check=(0,))
 
         a_block_ptr = tl.advance(a_block_ptr, (0, BLOCK_K))
         b_block_ptr = tl.advance(b_block_ptr, (BLOCK_K, 0))
@@ -225,10 +223,7 @@ def blockwise_sdd_matmul_kernel(
         block_shape=(BLOCK_M, BLOCK_N),
         order=(1, 0),
     )
-    if EVEN_K:
-        tl.store(c_block_ptr, c)
-    else:
-        tl.store(c_block_ptr, c, boundary_check=(0, 1))
+    tl.store(c_block_ptr, c, boundary_check=(0, 1))
 
 
 def blockwise_sdd_matmul(
@@ -243,8 +238,9 @@ def blockwise_sdd_matmul(
 
     # Check constraints
     assert A.shape[1] == B.shape[0], "Incompatible dimensions"
-    # assert A.is_contiguous(), "Matrix A must be contiguous"
-    # assert B.is_contiguous(), "Matrix B must be contiguous"
+
+    # A = A.contiguous()
+    # B = B.contiguous()
     M, K = A.shape
     K, N = B.shape
 
@@ -317,4 +313,7 @@ class BlockwiseDropoutMatmul(torch.autograd.Function):
         return grad_input, grad_weight, None, None
 
 
-blockwise_dropout_matmul = BlockwiseDropoutMatmul.apply
+def blockwise_dropout_matmul(
+    input: torch.Tensor, weight: torch.Tensor, block_size: size, p: float
+) -> torch.Tensor:
+    return BlockwiseDropoutMatmul.apply(input, weight, block_size, p)  # type: ignore

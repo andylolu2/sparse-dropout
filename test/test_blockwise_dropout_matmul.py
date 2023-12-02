@@ -1,5 +1,6 @@
 from itertools import product
 
+import lightning as L
 import pytest
 import torch
 
@@ -28,7 +29,7 @@ def test_blockwise_dropout_matmul(
     p: float,
 ):
     def run(f):
-        torch.manual_seed(0)
+        L.seed_everything(0)
         M, N, K = mnk
         # Run in fp32 because the naive implementation is numerically unstable.
         A = torch.randn((M, K), device="cuda", dtype=torch.float32, requires_grad=True)
@@ -42,6 +43,6 @@ def test_blockwise_dropout_matmul(
     dA, dB, C_naive = run(naive_blockwise_dropout_matmul)
     dA_triton, dB_triton, C_triton = run(blockwise_dropout_matmul)
 
-    torch.testing.assert_close(dA, dA_triton, atol=0.2, rtol=0.01)
-    torch.testing.assert_close(dB, dB_triton, atol=0.2, rtol=0.01)
     torch.testing.assert_close(C_naive, C_triton, atol=0.2, rtol=0.01)
+    torch.testing.assert_close(dB, dB_triton, atol=0.2, rtol=0.01)
+    torch.testing.assert_close(dA, dA_triton, atol=0.2, rtol=0.01)

@@ -15,14 +15,12 @@ class MNISTDataModule(L.LightningDataModule):
         train_size: int = 55000,
         val_size: int = 5000,
         val_batch_size: int | None = None,
-        seed: int = 42,
     ):
         super().__init__()
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size or train_batch_size
         self.train_size = train_size
         self.val_size = val_size
-        self.seed = seed
         self.data_dir = str(Path.home() / ".cache" / "torchvision" / "mnist")
         self.transform = transforms.ToTensor()
 
@@ -37,11 +35,9 @@ class MNISTDataModule(L.LightningDataModule):
     def setup(self, stage: str):
         if stage == "fit":
             mnist_full = MNIST(self.data_dir, train=True, transform=self.transform)
-            indices = (
-                np.random.default_rng(self.seed)
-                .choice(len(mnist_full), self.train_size + self.val_size, replace=False)
-                .tolist()
-            )
+            indices = np.random.choice(
+                len(mnist_full), self.train_size + self.val_size, replace=False
+            ).tolist()
             self.mnist_train = Subset(mnist_full, indices[: self.train_size])
             self.mnist_val = Subset(mnist_full, indices[self.train_size :])
         elif stage == "test":
@@ -57,10 +53,7 @@ class MNISTDataModule(L.LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(
-            self.mnist_train,
-            batch_size=self.train_batch_size,
-            shuffle=True,
-            generator=torch.Generator().manual_seed(self.seed + 1),
+            self.mnist_train, batch_size=self.train_batch_size, shuffle=True
         )
 
     def val_dataloader(self):

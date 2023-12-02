@@ -60,4 +60,4 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     np.random.seed(0)
 
-    benchmark.run(save_path="./logs", show_plots=True, print_data=True)
+    benchmark.run(save_path="./logs", print_data=True)

@@ -38,6 +38,7 @@ def structured_blockwise_dropout_matmul(
 def blockwise_dropout_matmul(
     input: torch.Tensor, weight: torch.Tensor, block_size: size, p: float
 ):
-    mask = blockwise_dropout_mask(input, block_size, p).to(input.device)
+    mask = blockwise_dropout_mask(input, block_size, p)
+    mask = torch.from_numpy(mask).to(input.device)
     input = blockwise_dropout(input, mask, block_size, p)
     return input @ weight

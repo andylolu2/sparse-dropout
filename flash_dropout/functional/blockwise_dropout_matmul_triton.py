@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.types
 import triton
@@ -5,16 +6,21 @@ import triton.language as tl
 
 from flash_dropout.functional.utils import (
     blockwise_dropout_mask,
+    config_product,
     mask_to_increment_table,
+    min_dtype,
     threadblock_swizzle,
 )
 from flash_dropout.types import size
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({"BLOCK_N": 64, "GROUP_M": 8}, num_stages=1, num_warps=4),
-    ],
+    configs=config_product(
+        num_warps=[1],
+        num_stages=[1],
+        BLOCK_N=[32, 64, 128],
+        GROUP_M=[8],
+    ),
     key=["M", "N", "K"],
 )
 @triton.heuristics(
@@ -83,8 +89,10 @@ def blockwise_dsd_matmul_kernel(
         else:  # Apply boundary checks on K
             a = tl.load(a_block_ptr, boundary_check=(1,))
             b = tl.load(b_block_ptr, boundary_check=(0,))
+        a = a.to(c_ptr.dtype.element_ty)
+        b = b.to(c_ptr.dtype.element_ty)
+        acc += tl.dot(a, b, out_dtype=acc.dtype)
 
-        acc += tl.dot(a, b)
         table_ptr += 1 * stride_t
     acc *= scale
     c = acc.to(c_ptr.dtype.element_ty)
@@ -103,7 +111,7 @@ def blockwise_dsd_matmul_kernel(
 
 def blockwise_dsd_matmul(
     A: torch.Tensor,
-    mask: torch.Tensor,
+    mask: np.ndarray,
     B: torch.Tensor,
     BLOCK_M: int,
     BLOCK_K: int,
@@ -113,23 +121,22 @@ def blockwise_dsd_matmul(
 
     # Check constraints
     assert A.shape[1] == B.shape[0], "Incompatible dimensions"
+    assert A.device == B.device, "Incompatible devices"
 
-    # A = A.contiguous()
-    # B = B.contiguous()
     M, K = A.shape
     K, N = B.shape
 
     # Allocate output
-    C = torch.zeros((M, N), device=A.device, dtype=A.dtype)
+    C = torch.zeros((M, N), device=A.device, dtype=min_dtype(A.dtype, B.dtype))
+
+    table, offsets, widths = mask_to_increment_table(mask, BLOCK_K)
+    table = torch.from_numpy(table).to(A.device)
+    # Pack offsets and widths into a single tensor. Helps improve cache locality.
+    header = np.stack((offsets, widths), axis=1)
+    header = torch.from_numpy(header).to(A.device)
 
     def grid(META):
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, META["BLOCK_N"]),)
-
-    table, offsets, widths = mask_to_increment_table(mask, BLOCK_K)
-    table = table.to(A.device)
-    # Pack offsets and widths into a single tensor.
-    # Helps improve cache locality.
-    header = torch.stack((offsets, widths), dim=1).to(A.device)
 
     blockwise_dsd_matmul_kernel[grid](
         # fmt: off
@@ -147,11 +154,11 @@ def blockwise_dsd_matmul(
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({"BLOCK_K": 32}, num_stages=1, num_warps=4),
-        triton.Config({"BLOCK_K": 64}, num_stages=1, num_warps=4),
-        triton.Config({"BLOCK_K": 128}, num_stages=1, num_warps=4),
-    ],
+    configs=config_product(
+        num_warps=[1],
+        num_stages=[1],
+        BLOCK_K=[32, 64],
+    ),
     key=["M", "N", "K"],
 )
 @triton.heuristics(
@@ -206,11 +213,12 @@ def blockwise_sdd_matmul_kernel(
         else:  # Apply boundary checks
             a = tl.load(a_block_ptr, boundary_check=(1,))
             b = tl.load(b_block_ptr, boundary_check=(0,))
+        a = a.to(c_ptr.dtype.element_ty)
+        b = b.to(c_ptr.dtype.element_ty)
+        acc += tl.dot(a, b, out_dtype=acc.dtype)
 
         a_block_ptr = tl.advance(a_block_ptr, (0, BLOCK_K))
         b_block_ptr = tl.advance(b_block_ptr, (BLOCK_K, 0))
-
-        acc += tl.dot(a, b)
     acc *= scale
     c = acc.to(c_ptr.dtype.element_ty)
 
@@ -229,7 +237,7 @@ def blockwise_sdd_matmul_kernel(
 def blockwise_sdd_matmul(
     A: torch.Tensor,
     B: torch.Tensor,
-    mask: torch.Tensor,
+    mask: np.ndarray,
     BLOCK_M: int,
     BLOCK_N: int,
     scale: float = 1.0,
@@ -238,15 +246,16 @@ def blockwise_sdd_matmul(
 
     # Check constraints
     assert A.shape[1] == B.shape[0], "Incompatible dimensions"
+    assert A.device == B.device, "Incompatible devices"
 
-    # A = A.contiguous()
-    # B = B.contiguous()
     M, K = A.shape
     K, N = B.shape
 
     # Allocate output
-    C = torch.zeros((M, N), device=A.device, dtype=A.dtype)
-    table = torch.nonzero(~mask, as_tuple=False).to(A.device)
+    C = torch.zeros((M, N), device=A.device, dtype=min_dtype(A.dtype, B.dtype))
+    table = np.stack(np.nonzero(~mask), axis=1)
+    table = torch.from_numpy(table).to(A.device)
+    # table = torch.nonzero(~mask, as_tuple=False).to(A.device)
 
     def grid(META):
         return (len(table),)

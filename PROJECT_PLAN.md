@@ -28,6 +28,8 @@ Extensions:
 - Many models apply dropout after embedding layer.
 - Can focus on the pre-QKV and pre-MLP dropout layers.
 
+## Dense forward & backward pass
+
 $$
 \begin{align*}
 Y &= X W \\

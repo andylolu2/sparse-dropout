@@ -1,5 +1,8 @@
+from itertools import product
 from math import ceil
+from typing import Any
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 import triton
@@ -8,19 +11,21 @@ import triton.language as tl
 from flash_dropout.types import size
 
 
-def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> torch.Tensor:
+def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> np.ndarray:
     """Creates a blockwise dropout mask for a matrix.
 
     Returns a mask tensor on the *CPU*.
     """
     *b, m, n = x.shape
-    mask = torch.rand(*b, ceil(m / block_size[0]), ceil(n / block_size[1])) < p
+    # mask = torch.rand(*b, ceil(m / block_size[0]), ceil(n / block_size[1])) < p
+    # return mask
+    mask = np.random.rand(*b, ceil(m / block_size[0]), ceil(n / block_size[1])) < p
     return mask
 
 
 def mask_to_increment_table(
-    mask: torch.Tensor, BLOCK_K: int
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    mask: np.ndarray, BLOCK_K: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Converts a mask to an pointer increment table.
 
     Args:
@@ -56,13 +61,27 @@ def mask_to_increment_table(
         row_indices = [0, 2, 5]
         row_widths = [2, 3, 2]
     """
-    row_widths = torch.sum(~mask, dim=1)
-    row_indices = torch.cumsum(row_widths[:-1], dim=0)
-    row_indices = F.pad(row_indices, (1, 0), value=0)
-    _, col_indices = torch.nonzero(~mask, as_tuple=True)
+    # row_widths = torch.sum(~mask, dim=1)
+    # row_indices = torch.cumsum(row_widths[:-1], dim=0)
+    # row_indices = F.pad(row_indices, (1, 0), value=0)
+    # _, col_indices = torch.nonzero(~mask, as_tuple=True)
+    # offsets = col_indices * BLOCK_K
+
+    # table = torch.diff(offsets, prepend=torch.tensor([0], device=offsets.device))
+    # # Set first element of each row to be the value in offsets.
+    # # Ignore rows that are out of range. Happens when the entire last row is dropped.
+    # row_indices_in_range = row_indices[row_indices < len(table)]
+    # table[row_indices_in_range] = offsets[row_indices_in_range]
+
+    # return table, row_indices, row_widths
+
+    row_widths = np.sum(~mask, axis=1)
+    row_indices = np.cumsum(row_widths[:-1])
+    row_indices = np.pad(row_indices, (1, 0), mode="constant", constant_values=0)
+    _, col_indices = np.nonzero(~mask)
     offsets = col_indices * BLOCK_K
 
-    table = torch.diff(offsets, prepend=torch.tensor([0], device=offsets.device))
+    table = np.diff(offsets, prepend=0)
     # Set first element of each row to be the value in offsets.
     # Ignore rows that are out of range. Happens when the entire last row is dropped.
     row_indices_in_range = row_indices[row_indices < len(table)]
@@ -129,3 +148,24 @@ def threadblock_swizzle(
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
     return pid_m, pid_n
+
+
+def min_dtype(a_dtype: torch.dtype, b_dtype: torch.dtype):
+    if torch.finfo(a_dtype).bits < torch.finfo(b_dtype).bits:
+        return a_dtype
+    else:
+        return b_dtype
+
+
+def config_product(
+    num_warps: list[int], num_stages: list[int], **kwargs: list[Any]
+) -> list[triton.Config]:
+    configs = []
+
+    for num_warp, num_stage, *values in product(
+        num_warps, num_stages, *kwargs.values()
+    ):
+        kwarg = dict(zip(kwargs.keys(), values))
+        configs.append(triton.Config(kwarg, num_warps=num_warp, num_stages=num_stage))
+
+    return configs

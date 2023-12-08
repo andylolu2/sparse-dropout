@@ -111,7 +111,8 @@ def blockwise_dsd_matmul_kernel(
 
 def blockwise_dsd_matmul(
     A: torch.Tensor,
-    mask: np.ndarray,
+    table: torch.Tensor,
+    header: torch.Tensor,
     B: torch.Tensor,
     BLOCK_M: int,
     BLOCK_K: int,
@@ -128,12 +129,6 @@ def blockwise_dsd_matmul(
 
     # Allocate output
     C = torch.zeros((M, N), device=A.device, dtype=min_dtype(A.dtype, B.dtype))
-
-    table, offsets, widths = mask_to_increment_table(mask, BLOCK_K)
-    table = torch.from_numpy(table).to(A.device)
-    # Pack offsets and widths into a single tensor. Helps improve cache locality.
-    header = np.stack((offsets, widths), axis=1)
-    header = torch.from_numpy(header).to(A.device)
 
     def grid(META):
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, META["BLOCK_N"]),)
@@ -237,7 +232,7 @@ def blockwise_sdd_matmul_kernel(
 def blockwise_sdd_matmul(
     A: torch.Tensor,
     B: torch.Tensor,
-    mask: np.ndarray,
+    table: torch.Tensor,
     BLOCK_M: int,
     BLOCK_N: int,
     scale: float = 1.0,
@@ -253,8 +248,8 @@ def blockwise_sdd_matmul(
 
     # Allocate output
     C = torch.zeros((M, N), device=A.device, dtype=min_dtype(A.dtype, B.dtype))
-    table = np.stack(np.nonzero(~mask), axis=1)
-    table = torch.from_numpy(table).to(A.device)
+    # table = np.stack(np.nonzero(~mask), axis=1)
+    # table = torch.from_numpy(table).to(A.device)
     # table = torch.nonzero(~mask, as_tuple=False).to(A.device)
 
     def grid(META):
@@ -288,14 +283,17 @@ class BlockwiseDropoutMatmul(torch.autograd.Function):
         BLOCK_M, BLOCK_K = block_size
         mask = blockwise_dropout_mask(input, (BLOCK_M, BLOCK_K), p=p)
 
-        ctx.save_for_backward(input, weight)
+        ctx.save_for_backward(input, weight, mask)
         ctx.block_size = block_size
         ctx.p = p
-        ctx.mask = mask
 
         # y (MN dense) = x (MK sparse) x w (KN dense)
+        table, offsets, widths = mask_to_increment_table(mask, BLOCK_K)
+        # Pack offsets and widths into a single tensor. Helps improve cache locality.
+        header = torch.stack((offsets, widths), dim=1)
+
         result = blockwise_dsd_matmul(
-            input, mask, weight, BLOCK_M, BLOCK_K, scale=1 / (1 - p)
+            input, table, header, weight, BLOCK_M, BLOCK_K, scale=1 / (1 - p)
         )
         return result
 
@@ -304,19 +302,21 @@ class BlockwiseDropoutMatmul(torch.autograd.Function):
         ctx: torch.autograd.function.FunctionCtx,
         grad_output: torch.Tensor,
     ):
-        input, weight = ctx.saved_tensors
+        input, weight, mask = ctx.saved_tensors
         BLOCK_M, BLOCK_K = ctx.block_size
         p = ctx.p
-        mask = ctx.mask
 
         # dx (MK sparse) = dy (MN dense) x w^T (KN dense)
+        table = torch.nonzero(~mask, as_tuple=False)
         grad_input = blockwise_sdd_matmul(
-            grad_output, weight.T, mask, BLOCK_M, BLOCK_K, scale=1 / (1 - p)
+            grad_output, weight.T, table, BLOCK_M, BLOCK_K, scale=1 / (1 - p)
         )
 
         # dw (KN dense) = x^T (KM sparse) x dy (MN dense)
+        table, offsets, widths = mask_to_increment_table(mask.T, BLOCK_M)
+        header = torch.stack((offsets, widths), dim=1)
         grad_weight = blockwise_dsd_matmul(
-            input.T, mask.T, grad_output, BLOCK_K, BLOCK_M, scale=1 / (1 - p)
+            input.T, table, header, grad_output, BLOCK_K, BLOCK_M, scale=1 / (1 - p)
         )
 
         return grad_input, grad_weight, None, None

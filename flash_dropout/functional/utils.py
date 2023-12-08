@@ -11,21 +11,20 @@ import triton.language as tl
 from flash_dropout.types import size
 
 
-def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float) -> np.ndarray:
+def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float):
     """Creates a blockwise dropout mask for a matrix.
 
     Returns a mask tensor on the *CPU*.
     """
     *b, m, n = x.shape
-    # mask = torch.rand(*b, ceil(m / block_size[0]), ceil(n / block_size[1])) < p
-    # return mask
-    mask = np.random.rand(*b, ceil(m / block_size[0]), ceil(n / block_size[1])) < p
+    mask_shape = (ceil(m / block_size[0]), ceil(n / block_size[1]))
+    mask = torch.rand(*b, *mask_shape, device=x.device) < p
     return mask
 
 
 def mask_to_increment_table(
-    mask: np.ndarray, BLOCK_K: int
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    mask: torch.Tensor, BLOCK_K: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Converts a mask to an pointer increment table.
 
     Args:
@@ -61,27 +60,13 @@ def mask_to_increment_table(
         row_indices = [0, 2, 5]
         row_widths = [2, 3, 2]
     """
-    # row_widths = torch.sum(~mask, dim=1)
-    # row_indices = torch.cumsum(row_widths[:-1], dim=0)
-    # row_indices = F.pad(row_indices, (1, 0), value=0)
-    # _, col_indices = torch.nonzero(~mask, as_tuple=True)
-    # offsets = col_indices * BLOCK_K
-
-    # table = torch.diff(offsets, prepend=torch.tensor([0], device=offsets.device))
-    # # Set first element of each row to be the value in offsets.
-    # # Ignore rows that are out of range. Happens when the entire last row is dropped.
-    # row_indices_in_range = row_indices[row_indices < len(table)]
-    # table[row_indices_in_range] = offsets[row_indices_in_range]
-
-    # return table, row_indices, row_widths
-
-    row_widths = np.sum(~mask, axis=1)
-    row_indices = np.cumsum(row_widths[:-1])
-    row_indices = np.pad(row_indices, (1, 0), mode="constant", constant_values=0)
-    _, col_indices = np.nonzero(~mask)
+    row_widths = torch.sum(~mask, dim=1)
+    row_indices = torch.cumsum(row_widths[:-1], dim=0)
+    row_indices = F.pad(row_indices, (1, 0), value=0)
+    _, col_indices = torch.nonzero(~mask, as_tuple=True)
     offsets = col_indices * BLOCK_K
 
-    table = np.diff(offsets, prepend=0)
+    table = torch.diff(offsets, prepend=torch.tensor([0], device=offsets.device))
     # Set first element of each row to be the value in offsets.
     # Ignore rows that are out of range. Happens when the entire last row is dropped.
     row_indices_in_range = row_indices[row_indices < len(table)]

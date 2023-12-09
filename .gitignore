@@ -9,3 +9,6 @@ __pycache__/
 # custom
 data/
 logs/
+
+# cuda
+flash_dropout/cuda/build

@@ -1,7 +1,6 @@
 import torch
 from absl import app, flags
-from torch.profiler import ProfilerActivity, profile, schedule
-from triton.ops import matmul
+from torch.profiler import ProfilerActivity, profile
 
 from flash_dropout.functional.blockwise_dropout_matmul_triton import (
     blockwise_dropout_matmul,
@@ -12,7 +11,7 @@ flags.DEFINE_integer("MNK", 1024, "Problem size")
 flags.DEFINE_integer("block_size", 64, "Dropout block size", short_name="b")
 flags.DEFINE_string("output", None, "File to save trace", required=True, short_name="o")
 flags.DEFINE_integer("warmup", 10, "Number of warmup iterations")
-flags.DEFINE_integer("iterations", 4, "Number of iterations")
+flags.DEFINE_integer("iterations", 3, "Number of iterations")
 
 
 def main(_):

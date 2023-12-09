@@ -1,4 +1,4 @@
-import numpy as np
+import lightning as L
 import torch
 import torch.types
 import triton
@@ -18,7 +18,7 @@ from flash_dropout.functional.utils import (
 )
 
 block_size = (64, 64)
-p = 0.5
+p = 0.1
 cache = {}
 
 
@@ -106,7 +106,5 @@ def benchmark(M, N, K, provider):
 
 
 if __name__ == "__main__":
-    torch.manual_seed(0)
-    np.random.seed(0)
-
+    L.seed_everything(0)
     benchmark.run(save_path="./logs", print_data=True)

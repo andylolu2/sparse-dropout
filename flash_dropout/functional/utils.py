@@ -1,8 +1,8 @@
+from functools import partial
 from itertools import product
 from math import ceil
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 import triton

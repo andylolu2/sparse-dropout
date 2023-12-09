@@ -1,0 +1,31 @@
+{
+    "name": "Existing Dockerfile",
+    "build": {
+        "context": "..",
+        "dockerfile": "Dockerfile"
+    },
+    "runArgs": [
+        "--gpus",
+        "all",
+        "--cap-add",
+        "SYS_ADMIN"
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cpptools-extension-pack",
+                "nvidia.nsight-vscode-edition",
+                "ms-vscode.makefile-tools",
+                "josetr.cmake-language-support-vscode",
+                "ms-python.python",
+                "ms-python.black-formatter",
+                "ms-python.isort"
+            ]
+        }
+    },
+    "updateRemoteUserUID": true,
+    "mounts": [
+        "type=bind,source=${localEnv:HOME}/.ssh,target=/home/dockeruser/.ssh,readonly",
+    ],
+}

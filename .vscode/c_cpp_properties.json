@@ -3,7 +3,10 @@
         {
             "name": "Linux",
             "includePath": [
+                "/usr/local/lib/python3.11/dist-packages/torch/include",
+                "/usr/local/lib/python3.11/dist-packages/torch/include/torch/csrc/api/include",
                 "/usr/local/cuda/include",
+                "/usr/include/python3.11",
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/flash_dropout/cuda/cutlass/include",
                 "${workspaceFolder}/flash_dropout/cuda/cutlass/tools/util/include"

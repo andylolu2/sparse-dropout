@@ -3,8 +3,8 @@
 
 int main(int argc, char *argv[])
 {
-    cutlass::DeviceAllocation<cute::half_t> x(24);
-    auto x = cute::make_tensor<cute::half_t>(cute::make_gmem_ptr(x.get()), cute::make_shape(2, 3, 4));
+    cutlass::DeviceAllocation<cute::half_t> x_ptr(24);
+    auto x = cute::make_tensor(cute::make_gmem_ptr(x_ptr.get()), cute::make_layout(cute::make_shape(4, 6)));
 
     return 0;
 }

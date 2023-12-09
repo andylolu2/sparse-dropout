@@ -10,3 +10,15 @@ fdropout = load(
         "flash_dropout/cuda/cutlass/include",
     ],
 )
+
+if __name__ == "__main__":
+    import torch
+
+    x = torch.arange(8, dtype=torch.float32, device="cuda").reshape(2, 4)
+    print(x)
+
+    (y,) = fdropout.forward(x)
+    print(y)
+
+    (dx,) = fdropout.backward(y)
+    print(dx)

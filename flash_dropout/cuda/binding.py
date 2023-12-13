@@ -14,11 +14,11 @@ fdropout = load(
 if __name__ == "__main__":
     import torch
 
-    x = torch.arange(8, dtype=torch.float32, device="cuda").reshape(2, 4)
-    print(x)
+    M, N, K = 32, 32, 32
 
-    (y,) = fdropout.forward(x)
-    print(y)
+    A = torch.randn(M, K, dtype=torch.float32, device="cuda")
+    B = torch.randn(K, N, dtype=torch.float32, device="cuda")
 
-    (dx,) = fdropout.backward(y)
-    print(dx)
+    (C,) = fdropout.forward(A, B)
+
+    print(C)

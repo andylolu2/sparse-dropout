@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "*.yml": "yaml",
+        "regex": "cpp",
+        "__hash_table": "cpp",
+        "locale": "cpp",
+        "string": "cpp",
+        "type_traits": "cpp",
+        "vector": "cpp",
+        "*.tcc": "cpp",
+        "valarray": "cpp"
+    }
+}

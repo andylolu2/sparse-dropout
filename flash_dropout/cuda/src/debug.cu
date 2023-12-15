@@ -2,6 +2,14 @@
 
 #include <cute/tensor.hpp>
 //
+#include <cutlass/layout/matrix.h>
+#include <cutlass/util/host_tensor.h>
+#include <cutlass/util/reference/device/tensor_fill.h>
+#include <cutlass/util/reference/host/gemm.h>
+#include <cutlass/util/reference/host/tensor_compare.h>
+#include <cutlass/util/reference/host/tensor_fill.h>
+#include <cutlass/util/tensor_view_io.h>
+
 #include <cute/arch/copy.hpp>
 #include <cute/arch/mma_sm75.hpp>
 #include <cute/atom/copy_atom.hpp>
@@ -23,75 +31,111 @@ namespace ct = cute;
 //     return tiled_copy;
 // }
 
-int main(int argc, char *argv[]) {
-    // using MmaAtom = ct::MMA_Atom<ct::SM75_16x8x8_F32F16F16F32_TN>;
-    // using TiledMma = ct::TiledMMA<MmaAtom>;
+template <typename scalar_t, typename Layout>
+auto host_tensor_to_ct_tensor(cutlass::HostTensor<scalar_t, Layout>& tensor,
+                              bool transpose = false) {
+    auto view_engine = ct::make_gmem_ptr(tensor.device_data());
+    int64_t row = tensor.extent().row();
+    int64_t col = tensor.extent().column();
+    int64_t stride = tensor.stride(0);
 
-    // auto tiled_mma = ct::make_tiled_mma(ct::SM75_16x8x8_F32F16F16F32_TN{});
-
-    // using copy_op = ct::AutoVectorizingCopyWithAssumedAlignment<128>;
-    // auto copy_atom = ct::Copy_Atom<ct::DefaultCopy, ct::half_t>{};
-
-    // auto tiled_copy = ct::make_tiled_copy(
-    //     copy_atom,
-    //     ct::Layout<ct::Shape<ct::_32, ct::_4>, ct::Stride<ct::_4,
-    //     ct::_1>>{});
-
-    // ct::print(tiled_mma);
-    // ct::print(tiled_copy);
-
-    // auto data = cutlass::DeviceAllocation<ct::half_t>(128);
-    // auto gA =
-    //     ct::make_tensor(ct::make_gmem_ptr(data.get()), ct::make_shape(513,
-    //     80));
-
-    // ct::print(thr_copy.partition_D(gA));
-    int64_t M = 64;
-    int64_t N = 64;
-    int64_t K = 32;
-
-    auto host_data_A = std::vector<ct::half_t>(M * K);
-    for (int i = 0; i < M * K; ++i) {
-        host_data_A[i] = ct::half_t(float(i) / 100.0f);
+    if (std::is_same_v<Layout, cutlass::layout::RowMajor>) {
+        if (transpose) {
+            throw std::runtime_error("Unsupported layout");
+            // return ct::make_tensor(view_engine, ct::make_layout(ct::make_shape(col, row),
+            //                                                     ct::make_stride(1L, stride)));
+        } else {
+            return ct::make_tensor(view_engine, ct::make_layout(ct::make_shape(row, col),
+                                                                ct::make_stride(stride, Int<1>{})));
+        }
+    } else if (std::is_same_v<Layout, cutlass::layout::ColumnMajor>) {
+        if (transpose) {
+            return ct::make_tensor(view_engine, ct::make_layout(ct::make_shape(col, row),
+                                                                ct::make_stride(stride, Int<1>{})));
+        } else {
+            throw std::runtime_error("Unsupported layout");
+            // return ct::make_tensor(view_engine, ct::make_layout(ct::make_shape(row, col),
+            // ct::make_stride(1L, stride)));
+        }
+    } else {
+        throw std::runtime_error("Unsupported layout");
     }
-    auto host_data_B = std::vector<ct::half_t>(N * K);
-    for (int i = 0; i < N * K; ++i) {
-        host_data_B[i] = ct::half_t(-float(i) / 100.0f);
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 4) {
+        std::cerr << "Usage: " << argv[0] << " M N K" << std::endl;
+        return 1;
     }
-    auto host_data_C = std::vector<ct::half_t>(M * N);
-    for (int i = 0; i < M * N; ++i) {
-        host_data_C[i] = ct::half_t(0);
+    int64_t M = std::atoi(argv[1]);
+    int64_t N = std::atoi(argv[2]);
+    int64_t K = std::atoi(argv[3]);
+
+    using scalar_t = ct::half_t;
+    using layout_A = cutlass::layout::RowMajor;
+    using layout_B = cutlass::layout::ColumnMajor;
+    using layout_C = cutlass::layout::RowMajor;
+
+    cutlass::HostTensor<scalar_t, layout_A> A({M, K});
+    cutlass::HostTensor<scalar_t, layout_B> B({K, N});
+    cutlass::HostTensor<scalar_t, layout_C> C({M, N});
+    cutlass::HostTensor<scalar_t, layout_C> C_ref({M, N});
+
+    // for (int i = 0; i < M; ++i) {
+    //     for (int j = 0; j < K; ++j) {
+    //         A.host_ref().at({i, j}) = scalar_t(float(i * K + j) / 100.0f);
+    //     }
+    // }
+    // for (int i = 0; i < K; ++i) {
+    //     for (int j = 0; j < N; ++j) {
+    //         B.host_ref().at({i, j}) = scalar_t(-float(i * K + j) / 100.0f);
+    //     }
+    // }
+
+    cutlass::reference::host::TensorFillRandomGaussian(A.host_view(), 0);
+    cutlass::reference::host::TensorFillRandomGaussian(B.host_view(), 0);
+    cutlass::reference::host::TensorFill(C.host_view(), ct::half_t(0));
+    cutlass::reference::host::TensorFill(C_ref.host_view(), ct::half_t(0));
+    A.sync_device();
+    B.sync_device();
+    C.sync_device();
+
+    auto A_ct = host_tensor_to_ct_tensor(A);
+    auto B_ct = host_tensor_to_ct_tensor(B, true);
+    auto C_ct = host_tensor_to_ct_tensor(C);
+
+    std::cout << "A layout: " << A_ct.layout() << std::endl;
+    std::cout << "B layout: " << B_ct.layout() << std::endl;
+    std::cout << "C layout: " << C_ct.layout() << std::endl;
+
+    cutlass::reference::host::Gemm<scalar_t, layout_A, scalar_t, layout_B, scalar_t, layout_C,
+                                   ct::half_t, float>
+        reference_gemm;
+    reference_gemm({int(M), int(N), int(K)}, ct::half_t(1), A.host_ref(), B.host_ref(),
+                   ct::half_t(0), C_ref.host_ref());
+    // std::cout << "C_ref" << std::endl << C_ref.host_view() << std::endl;
+
+    matmul(A_ct, B_ct, C_ct);
+
+    C.sync_host();
+    // std::cout << "C" << std::endl << C.host_view() << std::endl;
+
+    float max_rel_err = 0.0f;
+    float max_abs_err = 0.0f;
+
+    // Find the max diff
+    for (int64_t i = 0; i < M; ++i) {
+        for (int64_t j = 0; j < N; ++j) {
+            float c = C.host_ref().at({i, j});
+            float c_ref = C_ref.host_ref().at({i, j});
+            float diff = std::abs(c - c_ref);
+            float rel = diff / std::abs(c_ref);
+            max_abs_err = std::max(max_abs_err, diff);
+            max_rel_err = std::max(max_rel_err, rel);
+        }
     }
-
-    auto data_A = cutlass::DeviceAllocation<ct::half_t>(M * K);
-    auto data_B = cutlass::DeviceAllocation<ct::half_t>(N * K);
-    auto data_C = cutlass::DeviceAllocation<ct::half_t>(M * N);
-    data_A.copy_from_host(host_data_A.data());
-    data_B.copy_from_host(host_data_B.data());
-    data_C.copy_from_host(host_data_C.data());
-
-    auto A = ct::make_tensor(ct::make_gmem_ptr(data_A.get()),
-                             ct::make_layout(ct::make_shape(M, K), ct::make_stride(K, 1L)));
-    auto B = ct::make_tensor(ct::make_gmem_ptr(data_B.get()),
-                             ct::make_layout(ct::make_shape(N, K), ct::make_stride(K, 1L)));
-    auto C = ct::make_tensor(ct::make_gmem_ptr(data_C.get()),
-                             ct::make_layout(ct::make_shape(M, N), ct::make_stride(N, 1L)));
-
-    auto host_C = ct::make_tensor(host_data_C.data(), C.layout());
-    std::cout << host_C << std::endl;
-
-    matmul<ct::half_t><<<1, 128>>>(A, B, C);
-
-    data_C.copy_to_host(host_data_C.data());
-    std::cout << host_C << std::endl;
-
-    // auto shape = ct::make_shape(ct::_8{}, ct::_8{});
-    // auto tiled_shape = ct::tile_to_shape(ct::make_layout(shape),
-    //                                      ct::make_shape(ct::_32{},
-    //                                      ct::_64{}));
-
-    // std::cout << "shape: " << shape << std::endl;
-    // std::cout << "tiled_shape: " << tiled_shape << std::endl;
+    std::cout << "Max abs err: " << max_abs_err << std::endl;
+    std::cout << "Max rel err: " << max_rel_err * 100 << "%" << std::endl;
 
     return 0;
 }

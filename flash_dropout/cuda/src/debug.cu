@@ -81,17 +81,6 @@ int main(int argc, char* argv[]) {
     cutlass::HostTensor<scalar_t, layout_C> C({M, N});
     cutlass::HostTensor<scalar_t, layout_C> C_ref({M, N});
 
-    // for (int i = 0; i < M; ++i) {
-    //     for (int j = 0; j < K; ++j) {
-    //         A.host_ref().at({i, j}) = scalar_t(float(i * K + j) / 100.0f);
-    //     }
-    // }
-    // for (int i = 0; i < K; ++i) {
-    //     for (int j = 0; j < N; ++j) {
-    //         B.host_ref().at({i, j}) = scalar_t(-float(i * K + j) / 100.0f);
-    //     }
-    // }
-
     cutlass::reference::host::TensorFillRandomGaussian(A.host_view(), 0);
     cutlass::reference::host::TensorFillRandomGaussian(B.host_view(), 0);
     cutlass::reference::host::TensorFill(C.host_view(), ct::half_t(0));

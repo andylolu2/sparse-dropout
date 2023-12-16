@@ -1,5 +1,6 @@
 #include <cute/tensor.hpp>
 //
+#include <curand_kernel.h>
 #include <cutlass/util/device_dump.h>
 
 #include <cute/arch/copy.hpp>
@@ -26,22 +27,25 @@ struct KernelTraits {
     using T = scalar_t;
 
    public:
-    static constexpr int BLK_M = 128;
-    static constexpr int BLK_N = 128;
+    static constexpr int BLK_M = 64;
+    static constexpr int BLK_N = 64;
     static constexpr int BLK_K = 32;
-    static constexpr int NumStages = 3;
     static constexpr int NumThreads = 128;
+    static constexpr int GroupSizeM = 2;
 
    private:
+    static constexpr int AccessSizeBits = ct::sizeof_bits_v<ct::uint128_t>;
+    static constexpr int ElemsPerLoad = AccessSizeBits / ct::sizeof_bits_v<scalar_t>;
     static constexpr int SmemAtomInner = 32;
-    static constexpr int SmemAtomOuter = 8;
+    static constexpr int SmemAtomOuter = ElemsPerLoad;
+    static constexpr int ThreadsPerRow = SmemAtomInner / ElemsPerLoad;
+
     using SmemAtomLayout = decltype(ct::composition(
         ct::Swizzle<2, 3, 3>{}, ct::Layout<ct::Shape<Int<SmemAtomOuter>, Int<SmemAtomInner>>,
                                            ct::Stride<Int<SmemAtomInner>, Int<1>>>{}));
+    using SmemShapeA = ct::Shape<Int<BLK_M>, Int<BLK_K>>;
+    using SmemShapeB = ct::Shape<Int<BLK_N>, Int<BLK_K>>;
 
-    static constexpr int AccessSizeBits = ct::sizeof_bits_v<ct::uint128_t>;
-    static constexpr int ElemsPerLoad = AccessSizeBits / ct::sizeof_bits_v<scalar_t>;
-    static constexpr int ThreadsPerRow = SmemAtomInner / ElemsPerLoad;
     using GmemCopyAtom =
         ct::Copy_Atom<ct::AutoVectorizingCopyWithAssumedAlignment<AccessSizeBits>, scalar_t>;
     using GmemCopyThreadLayout =
@@ -51,22 +55,20 @@ struct KernelTraits {
 
     using SmemCopyAtom = ct::Copy_Atom<ct::SM75_U32x4_LDSM_N, scalar_t>;
 
-    using MmaAtom = ct::MMA_Atom<ct::SM75_16x8x8_F32F16F16F32_TN>;  // Warp-level instruction
-    using MmaWarpLayout =
-        ct::Layout<ct::Shape<Int<2>, Int<2>, Int<1>>>;  // 2x2x1 warps = 128 threads
+    using MmaAtom = ct::MMA_Atom<ct::SM75_16x8x8_F32F16F16F32_TN>;
+    using MmaThreadLayout = ct::Layout<ct::Shape<Int<2>, Int<2>, Int<1>>>;
     using MmaValLayout = ct::Layout<ct::Shape<Int<1>, Int<2>, Int<2>>>;
+    CUTE_STATIC_ASSERT(ct::size_v<MmaThreadLayout> *ct::size_v<MmaAtom::ThrID> == NumThreads);
 
    public:
     using BlockShapeA = ct::Shape<Int<BLK_M>, Int<BLK_K>>;
     using BlockShapeB = ct::Shape<Int<BLK_N>, Int<BLK_K>>;
     using BlockShapeC = ct::Shape<Int<BLK_M>, Int<BLK_N>>;
 
-    using SmemShapeA = ct::Shape<Int<BLK_M>, Int<BLK_K>, Int<NumStages>>;
-    using SmemShapeB = ct::Shape<Int<BLK_N>, Int<BLK_K>, Int<NumStages>>;
     using SmemLayoutA = decltype(ct::tile_to_shape(SmemAtomLayout{}, SmemShapeA{}));
     using SmemLayoutB = decltype(ct::tile_to_shape(SmemAtomLayout{}, SmemShapeB{}));
 
-    using TiledMMA = ct::TiledMMA<MmaAtom, MmaWarpLayout, MmaValLayout>;
+    using TiledMMA = ct::TiledMMA<MmaAtom, MmaThreadLayout, MmaValLayout>;
 
     using GmemTiledCopy =
         decltype(ct::make_tiled_copy(GmemCopyAtom{}, GmemCopyThreadLayout{}, GmemCopyValLayout{}));
@@ -87,21 +89,21 @@ __device__ void matmul_thread(ct::Tensor<Gmem<scalar_t>, LayoutGaSrc> gA_to_sA_s
                               ct::Tensor<Gmem<scalar_t>, LayoutC> C_blk) {
     typename KernelTraits::TiledMMA tiled_mma;
     auto thr_mma = tiled_mma.get_thread_slice(threadIdx.x);
-    auto rA = thr_mma.partition_fragment_A(sA);     // MMA, MMA_M, MMA_K, NumStages_K
-    auto rB = thr_mma.partition_fragment_B(sB);     // MMA, MMA_N, MMA_K, NumStages_K
+    auto rA = thr_mma.partition_fragment_A(sA);     // MMA, MMA_M, MMA_K
+    auto rB = thr_mma.partition_fragment_B(sB);     // MMA, MMA_N, MMA_K
     auto rC = thr_mma.partition_fragment_C(C_blk);  // MMA, MMA_M, MMA_N
     auto gC = thr_mma.partition_C(C_blk);           // Corresponding fragment in gmem to write back
     ct::clear(rC);
 
     typename KernelTraits::SmemTiledCopyA tiled_copy_A;
     auto thr_copy_A = tiled_copy_A.get_thread_slice(threadIdx.x);
-    auto sA_to_rA_src = thr_copy_A.partition_S(sA);  // COPY_V, COPY_M, COPY_K, NumStages_K
-    auto sA_to_rA_dst = thr_copy_A.retile_D(rA);     // COPY_V, COPY_M, COPY_K, NumStages_K
+    auto sA_to_rA_src = thr_copy_A.partition_S(sA);  // COPY_V, COPY_M, COPY_K
+    auto sA_to_rA_dst = thr_copy_A.retile_D(rA);     // COPY_V, COPY_M, COPY_K
 
     typename KernelTraits::SmemTiledCopyB tiled_copy_B;
     auto thr_copy_B = tiled_copy_B.get_thread_slice(threadIdx.x);
-    auto sB_to_rB_src = thr_copy_B.partition_S(sB);  // COPY_V, COPY_N, COPY_K, NumStages_K
-    auto sB_to_rB_dst = thr_copy_B.retile_D(rB);     // COPY_V, COPY_N, COPY_K, NumStages_K
+    auto sB_to_rB_src = thr_copy_B.partition_S(sB);  // COPY_V, COPY_N, COPY_K
+    auto sB_to_rB_dst = thr_copy_B.retile_D(rB);     // COPY_V, COPY_N, COPY_K
 
 #if 0
     if (ct::thread0()) {
@@ -140,17 +142,15 @@ __device__ void matmul_thread(ct::Tensor<Gmem<scalar_t>, LayoutGaSrc> gA_to_sA_s
 
 #pragma unroll
     for (size_t k_blk = 0; k_blk < N_BLK_K; k_blk++) {
-        // Populate sA and sB by copying each thread's fragment from gmem to smem
         ct::copy(gmem_copy_atom, gA_to_sA_src(_, _, _, k_blk), gA_to_sA_dst);
         ct::copy(gmem_copy_atom, gB_to_sB_src(_, _, _, k_blk), gB_to_sB_dst);
         __syncthreads();
-        // Now sA and sB have data for this iteration
-        // cutlass::debug::dump_shmem(sA.data().get(), sA.size());
 
-        // Populate rA and rB (distributed across registers of threads) by copying from sA and sB
+        // Load rA and rB (distributed across registers of threads) by copying from smem to gmem
         ct::copy(tiled_copy_A, sA_to_rA_src, sA_to_rA_dst);
         ct::copy(tiled_copy_B, sB_to_rB_src, sB_to_rB_dst);
 #if 0
+        cutlass::debug::dump_shmem(sA.data().get(), sA.size());
         if (ct::thread0()) {
             for (size_t i = 0; i < ct::size(rA); i++) {
                 printf("%.0f ", static_cast<float>(rA(i)));
@@ -158,7 +158,7 @@ __device__ void matmul_thread(ct::Tensor<Gmem<scalar_t>, LayoutGaSrc> gA_to_sA_s
             printf("\n");
         }
 #endif
-        // Perform gemm on rA, rB, rC (inner loop handled by cute)
+        // Perform gemm
         ct::gemm(tiled_mma, rA, rB, rC);
 #if 0
         if (ct::thread0()) {
@@ -176,16 +176,16 @@ __device__ void matmul_thread(ct::Tensor<Gmem<scalar_t>, LayoutGaSrc> gA_to_sA_s
 
 template <typename KernelTraits, typename LayoutA, typename LayoutB, typename LayoutC,
           typename scalar_t = typename KernelTraits::T>
-__device__ void matmul_tb(ct::Tensor<Gmem<scalar_t>, LayoutA> A_blk,
-                          ct::Tensor<Gmem<scalar_t>, LayoutB> B_blk,
-                          ct::Tensor<Gmem<scalar_t>, LayoutC> C_blk) {
-    using SmemLayoutA = typename KernelTraits::SmemLayoutA;
-    using SmemLayoutB = typename KernelTraits::SmemLayoutB;
+__device__ void matmul_threadblock(ct::Tensor<Gmem<scalar_t>, LayoutA> A_blk,
+                                   ct::Tensor<Gmem<scalar_t>, LayoutB> B_blk,
+                                   ct::Tensor<Gmem<scalar_t>, LayoutC> C_blk) {
+    typename KernelTraits::SmemLayoutA smem_layout_A;
+    typename KernelTraits::SmemLayoutB smem_layout_B;
 
-    __shared__ scalar_t sA_data[ct::cosize_v<SmemLayoutA>];
-    __shared__ scalar_t sB_data[ct::cosize_v<SmemLayoutB>];
-    auto sA = ct::make_tensor(ct::make_smem_ptr(sA_data), SmemLayoutA{});
-    auto sB = ct::make_tensor(ct::make_smem_ptr(sB_data), SmemLayoutB{});
+    __shared__ scalar_t sA_data[ct::cosize_v<decltype(smem_layout_A)>];
+    __shared__ scalar_t sB_data[ct::cosize_v<decltype(smem_layout_B)>];
+    auto sA = ct::make_tensor(ct::make_smem_ptr(sA_data), smem_layout_A);
+    auto sB = ct::make_tensor(ct::make_smem_ptr(sB_data), smem_layout_B);
 
 #if 0
     if (ct::thread0()) {
@@ -207,9 +207,9 @@ __device__ void matmul_tb(ct::Tensor<Gmem<scalar_t>, LayoutA> A_blk,
 
     // Fragments for gmem -> smem copy
     auto gA_to_sA_src = gmem_thr_copy.partition_S(A_blk);  // COPY_V, COPY_M, COPY_K, N_BLK_K
-    auto gA_to_sA_dst = gmem_thr_copy.partition_D(sA);     // COPY_V, COPY_M, COPY_K, NumStages_K
+    auto gA_to_sA_dst = gmem_thr_copy.partition_D(sA);     // COPY_V, COPY_M, COPY_K
     auto gB_to_sB_src = gmem_thr_copy.partition_S(B_blk);  // COPY_V, COPY_N, COPY_K, N_BLK_K
-    auto gB_to_sB_dst = gmem_thr_copy.partition_D(sB);     // COPY_V, COPY_N, COPY_K, NumStages_K
+    auto gB_to_sB_dst = gmem_thr_copy.partition_D(sB);     // COPY_V, COPY_N, COPY_K
 
 #if 0
     if (ct::thread0()) {
@@ -246,12 +246,21 @@ __global__ void matmul_kernel(ct::Tensor<Gmem<scalar_t>, RowMajor2D> A,
     using BlockShapeB = typename KernelTraits::BlockShapeB;
     using BlockShapeC = typename KernelTraits::BlockShapeC;
 
-    auto A_blk_all = ct::tiled_divide(A, BlockShapeA{});    // (BLK_M, BLK_K), N_BLK_M, N_BLK_K
-    auto B_blk_all = ct::tiled_divide(B, BlockShapeB{});    // (BLK_N, BLK_K), N_BLK_N, N_BLK_K
-    auto C_blk_all = ct::tiled_divide(C, BlockShapeC{});    // (BLK_M, BLK_N), N_BLK_M, N_BLK_N
-    auto A_blk = ct::flatten(A_blk_all(_, blockIdx.x, _));  // BLK_M, BLK_K, N_BLK_K
-    auto B_blk = ct::flatten(B_blk_all(_, blockIdx.y, _));  // BLK_N, BLK_K, N_BLK_K
-    auto C_blk = ct::flatten(C_blk_all(_, blockIdx.x, blockIdx.y));  // BLK_M, BLK_N
+    auto A_blk_all = ct::tiled_divide(A, BlockShapeA{});  // (BLK_M, BLK_K), N_BLK_M, N_BLK_K
+    auto B_blk_all = ct::tiled_divide(B, BlockShapeB{});  // (BLK_N, BLK_K), N_BLK_N, N_BLK_K
+    auto C_blk_all = ct::tiled_divide(C, BlockShapeC{});  // (BLK_M, BLK_N), N_BLK_M, N_BLK_N
+
+    int N_BLK_M = ct::size<1>(A_blk_all);
+    int N_BLK_N = ct::size<1>(B_blk_all);
+    int blocks_per_group = KernelTraits::GroupSizeM * N_BLK_N;
+    int first_block_idx_m = (blockIdx.x / blocks_per_group) * KernelTraits::GroupSizeM;
+    int group_size_m = min(N_BLK_M - first_block_idx_m, KernelTraits::GroupSizeM);  // Handle edge
+    int block_idx_m = first_block_idx_m + (blockIdx.x % group_size_m);
+    int block_idx_n = (blockIdx.x % blocks_per_group) / group_size_m;
+
+    auto A_blk = ct::flatten(A_blk_all(_, block_idx_m, _));            // BLK_M, BLK_K, N_BLK_K
+    auto B_blk = ct::flatten(B_blk_all(_, block_idx_n, _));            // BLK_N, BLK_K, N_BLK_K
+    auto C_blk = ct::flatten(C_blk_all(_, block_idx_m, block_idx_n));  // BLK_M, BLK_N
 
 #if 0
     if (ct::thread0()) {
@@ -276,7 +285,7 @@ __global__ void matmul_kernel(ct::Tensor<Gmem<scalar_t>, RowMajor2D> A,
     }
 #endif
 
-    matmul_tb<KernelTraits>(A_blk, B_blk, C_blk);
+    matmul_threadblock<KernelTraits>(A_blk, B_blk, C_blk);
 }
 
 template <typename scalar_t>
@@ -300,7 +309,7 @@ void matmul(ct::Tensor<Gmem<scalar_t>, RowMajor2D> A, ct::Tensor<Gmem<scalar_t>,
     assert(N % BLK_N == 0);
     assert(K % BLK_K == 0);
 
-    dim3 block_dim(M / BLK_M, N / BLK_N);
+    dim3 block_dim((M / BLK_M) * (N / BLK_N));
     dim3 thread_dim(KernelTraits::NumThreads);
 
     matmul_kernel<KernelTraits><<<block_dim, thread_dim>>>(A, B, C);

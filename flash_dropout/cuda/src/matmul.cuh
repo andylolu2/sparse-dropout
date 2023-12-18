@@ -24,14 +24,16 @@ using Smem = ct::ViewEngine<ct::smem_ptr<scalar_t *>>;
 
 template <typename KernelTraits, typename LayoutGaSrc, typename LayoutGaDst, typename LayoutGbSrc,
           typename LayoutGbDst, typename LayoutSa, typename LayoutSb, typename LayoutC,
-          typename scalar_t = typename KernelTraits::T>
-__device__ void matmul_thread(ct::Tensor<Gmem<scalar_t>, LayoutGaSrc> gA_to_sA_src,
-                              ct::Tensor<Smem<scalar_t>, LayoutGaDst> gA_to_sA_dst,
-                              ct::Tensor<Gmem<scalar_t>, LayoutGbSrc> gB_to_sB_src,
-                              ct::Tensor<Smem<scalar_t>, LayoutGbDst> gB_to_sB_dst,
-                              ct::Tensor<Smem<scalar_t>, LayoutSa> sA,
-                              ct::Tensor<Smem<scalar_t>, LayoutSb> sB,
-                              ct::Tensor<Gmem<scalar_t>, LayoutC> C_blk, ct::uint128_t mask_bits) {
+          typename LayoutMask>
+__device__ void matmul_thread(
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGaSrc> gA_to_sA_src,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutGaDst> gA_to_sA_dst,
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGbSrc> gB_to_sB_src,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutGbDst> gB_to_sB_dst,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutSa> sA,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutSb> sB,
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits) {
     typename KernelTraits::GmemTiledCopyA gmem_tiled_copy_A;
     typename KernelTraits::GmemTiledCopyB gmem_tiled_copy_B;
     typename KernelTraits::GmemTiledCopyC gmem_tiled_copy_C;
@@ -95,13 +97,20 @@ __device__ void matmul_thread(ct::Tensor<Gmem<scalar_t>, LayoutGaSrc> gA_to_sA_s
 #endif
 
     int N_BLK_K = ct::size<3>(gA_to_sA_src);
+    using TMask = typename KernelTraits::TMask;
+    TMask mask_bit_pack;
 
 #pragma unroll
     for (size_t k_blk = 0; k_blk < N_BLK_K; k_blk++) {
-        if ((mask_bits.hilo_.lo & 1) == 1) {
+        if (k_blk % ct::sizeof_bits_v<TMask> == 0) {
+            mask_bit_pack = mask_bits(k_blk / ct::sizeof_bits_v<TMask>);
+        }
+        bool drop_block = (mask_bit_pack & 1) == 1;
+        mask_bit_pack = mask_bit_pack >> 1;
+        if (drop_block) {
             continue;
         }
-        mask_bits = mask_bits >> 1;
+
         ct::copy(gmem_tiled_copy_A, gA_to_sA_src(_, _, _, k_blk), gA_to_sA_dst);
         ct::copy(gmem_tiled_copy_B, gB_to_sB_src(_, _, _, k_blk), gB_to_sB_dst);
         __syncthreads();
@@ -135,16 +144,17 @@ __device__ void matmul_thread(ct::Tensor<Gmem<scalar_t>, LayoutGaSrc> gA_to_sA_s
 }
 
 template <typename KernelTraits, typename LayoutA, typename LayoutB, typename LayoutC,
-          typename scalar_t = typename KernelTraits::T>
-__device__ void matmul_threadblock(ct::Tensor<Gmem<scalar_t>, LayoutA> A_blk,
-                                   ct::Tensor<Gmem<scalar_t>, LayoutB> B_blk,
-                                   ct::Tensor<Gmem<scalar_t>, LayoutC> C_blk,
-                                   ct::uint128_t mask_bits) {
+          typename LayoutMask>
+__device__ void matmul_threadblock(
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutA> A_blk,
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutB> B_blk,
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits) {
     typename KernelTraits::SmemLayoutA smem_layout_A;
     typename KernelTraits::SmemLayoutB smem_layout_B;
 
-    __shared__ scalar_t sA_data[ct::cosize_v<decltype(smem_layout_A)>];
-    __shared__ scalar_t sB_data[ct::cosize_v<decltype(smem_layout_B)>];
+    __shared__ typename KernelTraits::T sA_data[ct::cosize_v<decltype(smem_layout_A)>];
+    __shared__ typename KernelTraits::T sB_data[ct::cosize_v<decltype(smem_layout_B)>];
     auto sA = ct::make_tensor(ct::make_smem_ptr(sA_data), smem_layout_A);
     auto sB = ct::make_tensor(ct::make_smem_ptr(sB_data), smem_layout_B);
 
@@ -201,11 +211,12 @@ __device__ void matmul_threadblock(ct::Tensor<Gmem<scalar_t>, LayoutA> A_blk,
                                 C_blk, mask_bits);
 }
 
-template <typename KernelTraits, typename LayoutMask, typename scalar_t = typename KernelTraits::T>
-__global__ void matmul_kernel(ct::Tensor<Gmem<scalar_t>, typename KernelTraits::LayoutA> A,
-                              ct::Tensor<Gmem<scalar_t>, typename KernelTraits::LayoutB> B,
-                              ct::Tensor<Gmem<scalar_t>, typename KernelTraits::LayoutC> C,
-                              ct::Tensor<Gmem<ct::uint128_t>, LayoutMask> mask) {
+template <typename KernelTraits>
+__global__ void matmul_kernel(
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask) {
     using BlockShapeA = typename KernelTraits::BlockShapeA;
     using BlockShapeB = typename KernelTraits::BlockShapeB;
     using BlockShapeC = typename KernelTraits::BlockShapeC;
@@ -256,11 +267,12 @@ __global__ void matmul_kernel(ct::Tensor<Gmem<scalar_t>, typename KernelTraits::
     matmul_threadblock<KernelTraits>(A_blk, B_blk, C_blk, mask_bits);
 }
 
-template <typename KernelTraits, typename LayoutMask, typename scalar_t = typename KernelTraits::T>
-void matmul(ct::Tensor<Gmem<scalar_t>, typename KernelTraits::LayoutA> A,
-            ct::Tensor<Gmem<scalar_t>, typename KernelTraits::LayoutB> B,
-            ct::Tensor<Gmem<scalar_t>, typename KernelTraits::LayoutC> C,
-            ct::Tensor<Gmem<ct::uint128_t>, LayoutMask> mask) {
+template <typename KernelTraits, typename LayoutMask>
+void matmul(
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask) {
     assert(ct::size<0>(A) == ct::size<0>(C));  // M
     assert(ct::size<1>(B) == ct::size<0>(C));  // N
     assert(ct::size<1>(A) == ct::size<1>(B));  // K
@@ -279,8 +291,10 @@ void matmul(ct::Tensor<Gmem<scalar_t>, typename KernelTraits::LayoutA> A,
 
     size_t N_BLK_M = M / BLK_M;
     size_t N_BLK_N = N / BLK_N;
+    size_t N_BLK_K = K / BLK_K;
 
     assert(ct::size<0>(mask) == N_BLK_M);
+    assert(ct::size<1>(mask) * ct::sizeof_bits_v<typename KernelTraits::TMask> >= N_BLK_K);
 
     dim3 block_dim(N_BLK_M * N_BLK_N);
     dim3 thread_dim(KernelTraits::NumThreads);
@@ -297,20 +311,32 @@ ct::uint128_t set_bit(ct::uint128_t mask, int8_t i, bool val = true) {
     return mask;
 }
 
-std::tuple<std::vector<ct::uint128_t>, std::vector<ct::uint128_t>,
-           std::vector<std::tuple<int64_t, int64_t>>>
+template <typename KernelTraits>
+std::tuple<std::vector<typename KernelTraits::TMask>, std::vector<typename KernelTraits::TMask>,
+           std::vector<int64_t>>
 make_mask(int64_t N_BLK_M, int64_t N_BLK_K, double p) {
-    std::vector<ct::uint128_t> mask(N_BLK_M);
-    std::vector<ct::uint128_t> mask_T(N_BLK_K);
-    std::vector<std::tuple<int64_t, int64_t>> mask_table;
+    using TMask = typename KernelTraits::TMask;
+    static constexpr int TMaskBits = ct::sizeof_bits_v<TMask>;
+    auto mask_shape = ct::mask_shape(N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits));
+    auto mask_T_shape = ct::mask_shape(N_BLK_K * ct::ceil_div(N_BLK_M, TMaskBits));
+    std::vector<TMask> mask_data(ct::size(mask_shape));
+    std::vector<TMask> mask_T_data(ct::size(mask_T_shape));
+    std::vector<int64_t> mask_table;
+
+    auto mask = ct::make_tensor(mask_data.begin(), ct::make_layout(mask_shape, ct::GenRowMajor{}));
+    auto mask_T =
+        ct::make_tensor(mask_T_data.begin() ct::make_layout(mask_T_shape, ct::GenRowMajor{}));
 
     for (int64_t i = 0; i < N_BLK_M; ++i) {
         for (int64_t j = 0; j < N_BLK_K; ++j) {
             bool val = std::rand() < (p * RAND_MAX);
-            mask[i] = set_bit(mask[i], j, val);
-            mask_T[j] = set_bit(mask_T[j], i, val);
+
+            mask(i, j / TMaskBits) = mask(i, j / TMaskBits) | (val << (j % TMaskBits));
+            mask_T(j, i / TMaskBits) = mask_T(j, i / TMaskBits) | (val << (i % TMaskBits));
+
             if (val) {
-                mask_table.emplace_back(i, j);
+                mask_table.emplace_back(i);
+                mask_table.emplace_back(j);
             }
         }
     }

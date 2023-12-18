@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
     using Coord = layout_Mask::TensorCoord;
     using KernelTraits =
         KernelTraits<scalar_t, 64, 64, 32, 2, std::is_same_v<layout_A, cutlass::layout::RowMajor>,
-                     std::is_same_v<layout_B, cutlass::layout::ColumnMajor>>;
+                     std::is_same_v<layout_B, cutlass::layout::ColumnMajor>, true>;
 
     int64_t BLK_M = KernelTraits::BLK_M;
     int64_t BLK_K = KernelTraits::BLK_K;

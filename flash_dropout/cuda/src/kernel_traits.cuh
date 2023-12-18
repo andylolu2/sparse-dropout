@@ -20,10 +20,10 @@ template <typename scalar_t>
 using Smem = ct::ViewEngine<ct::smem_ptr<scalar_t *>>;
 
 template <typename scalar_t, int BLK_M_, int BLK_N_, int BLK_K_, int GroupSizeM_, bool RowMajorA,
-          bool RowMajorB>
+          bool RowMajorB, bool RowMajorMask>
 struct KernelTraits {
     using T = scalar_t;
-    using TMask = ct::uint128_t;
+    using TMask = ct::uint64_t;
 
    public:
     static constexpr int BLK_M = BLK_M_;
@@ -39,6 +39,9 @@ struct KernelTraits {
         std::conditional_t<RowMajorB, ct::Stride<int64_t, Int<1>>, ct::Stride<Int<1>, int64_t>>>;
     // Only support row major C
     using LayoutC = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<int64_t, Int<1>>>;
+    using LayoutMask = ct::Layout<
+        ct::Shape<int64_t, int64_t>,
+        std::conditional_t<RowMajorMask, ct::Stride<int64_t, Int<1>>, ct::Stride<Int<1>, int64_t>>>;
 
    private:
     static constexpr int AccessSizeBits = ct::sizeof_bits_v<ct::uint128_t>;

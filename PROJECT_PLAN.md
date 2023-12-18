@@ -30,10 +30,16 @@ Extensions:
 
 ## Dense forward & backward pass
 
-$$
-\begin{align*}
-Y &= X W \\
-\frac{\partial L}{\partial X} &= \frac{\partial L}{\partial Y} W^T \\
-\frac{\partial L}{\partial W} &= X^T \frac{\partial L}{\partial Y} \\
-\end{align*}
-$$
+Forward pass:
+- $Y = X W$
+    - Shape: `M N K`
+    - Layout: `Row = Row x Row`
+
+Backward pass:
+- $\frac{\partial L}{\partial X} = \frac{\partial L}{\partial Y} W^T$
+    - Shape: `M K N`
+    - Layout: `Row = Row x Col`
+- $\frac{\partial L}{\partial W} = X^T \frac{\partial L}{\partial Y}$
+    - Shape: `K N M`
+    - Layout: `Row = Col x Row`
+

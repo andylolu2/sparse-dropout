@@ -75,6 +75,22 @@
         "typeindex": "cpp",
         "typeinfo": "cpp",
         "variant": "cpp",
-        "__nullptr": "cpp"
+        "__nullptr": "cpp",
+        "cassert": "cpp",
+        "cerrno": "cpp",
+        "cfloat": "cpp",
+        "climits": "cpp",
+        "filesystem": "cpp",
+        "ios": "cpp",
+        "queue": "cpp",
+        "stack": "cpp",
+        "version": "cpp",
+        "__bit_reference": "cpp",
+        "__config": "cpp",
+        "__functional_03": "cpp",
+        "__functional_base": "cpp",
+        "__locale": "cpp",
+        "__string": "cpp",
+        "__tree": "cpp"
     }
 }

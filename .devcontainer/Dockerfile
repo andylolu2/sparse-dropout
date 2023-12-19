@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+FROM nvcr.io/nvidia/pytorch:23.11-py3
 
 ARG USERNAME=dockeruser
 ARG USER_UID=1000
@@ -10,7 +10,7 @@ RUN apt update && \
     add-apt-repository ppa:git-core/ppa && \
     apt-add-repository ppa:fish-shell/release-3 && \
     apt-add-repository ppa:neovim-ppa/unstable && \
-    add-apt-repository ppa:deadsnakes/ppa && \
+    # add-apt-repository ppa:deadsnakes/ppa && \
     apt install -y \
         build-essential \
         cmake \
@@ -18,22 +18,22 @@ RUN apt update && \
         fish \
         git \
         neovim \
-        python3.11 \
-        python3.11-dev \
-        python3-pip \
+        # python3.11 \
+        # python3.11-dev \
+        # python3-pip \
         ripgrep \
         sudo \
         tar \
         tmux \
-        wget \
-        && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+        wget
+        # && \
+    # update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
 # Install python dependencies
 COPY pyproject.toml poetry.lock ./
-RUN python -m pip install poetry==1.7.0 && \
-    python -m poetry config virtualenvs.create false && \
-    python -m poetry install --no-interaction --no-ansi --no-root
+RUN pip install poetry==1.7.0 && \
+    poetry config virtualenvs.create false && \
+    poetry install --no-interaction --no-ansi --no-root
 
 # Create the user
 RUN groupadd --gid $USER_GID $USERNAME && \

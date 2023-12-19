@@ -103,10 +103,7 @@ int main(int argc, char* argv[]) {
     using Coord = layout_Mask::TensorCoord;
     using KernelTraits =
         KernelTraits<scalar_t, 64, 64, 32, 2, std::is_same_v<layout_A, cutlass::layout::RowMajor>,
-                     std::is_same_v<layout_B, cutlass::layout::ColumnMajor>, true>;
-
-    int64_t BLK_M = KernelTraits::BLK_M;
-    int64_t BLK_K = KernelTraits::BLK_K;
+                     std::is_same_v<layout_B, cutlass::layout::ColumnMajor>>;
 
     cutlass::HostTensor<scalar_t, layout_A> A({M, K});
     cutlass::HostTensor<scalar_t, layout_B> B({K, N});
@@ -118,20 +115,15 @@ int main(int argc, char* argv[]) {
     cutlass::reference::host::TensorFill(C.host_view(), ct::half_t(0));
     cutlass::reference::host::TensorFill(C_ref.host_view(), ct::half_t(0));
 
-    cutlass::DeviceAllocation<ct::uint128_t> mask_data(M / BLK_M);
-    auto [mask, mask_T, mask_table] = make_mask(M / BLK_M, K / BLK_K, 0.5);
-    mask_data.copy_from_host(mask.data());
-
-    std::cout << "mask: " << std::endl;
-    for (int64_t i = 0; i < M / BLK_M; ++i) {
-        auto m = mask[i];
-        std::cout << std::bitset<64>(m.hilo_.hi) << std::bitset<64>(m.hilo_.lo) << std::endl;
-    }
-    std::cout << "mask_T: " << std::endl;
-    for (int64_t i = 0; i < K / BLK_K; ++i) {
-        auto m = mask_T[i];
-        std::cout << std::bitset<64>(m.hilo_.hi) << std::bitset<64>(m.hilo_.lo) << std::endl;
-    }
+    auto [mask_host, mask_T_host, mask_table_host] = make_mask_data<KernelTraits>(M, K, 0.0);
+    cutlass::DeviceAllocation<typename KernelTraits::TMask> mask_data(mask_host.size());
+    cutlass::DeviceAllocation<typename KernelTraits::TMask> mask_T_data(mask_T_host.size());
+    cutlass::DeviceAllocation<int64_t> mask_table_data(mask_table_host.size());
+    mask_data.copy_from_host(mask_host.data());
+    mask_T_data.copy_from_host(mask_T_host.data());
+    mask_table_data.copy_from_host(mask_table_host.data());
+    auto [mask, mask_T, mask_table] = make_mask<KernelTraits>(
+        mask_data.get(), mask_T_data.get(), mask_table_data.get(), mask_table_data.size(), M, K);
 
     A.sync_device();
     B.sync_device();
@@ -140,12 +132,13 @@ int main(int argc, char* argv[]) {
     auto A_ct = host_tensor_to_ct_tensor_col_major(A);
     auto B_ct = host_tensor_to_ct_tensor_col_major(B, true);
     auto C_ct = host_tensor_to_ct_tensor_row_major(C);
-    auto mask_ct = ct::make_tensor(ct::make_gmem_ptr(mask_data.get()), ct::make_shape(M / BLK_M));
 
     std::cout << "A layout: " << A_ct.layout() << std::endl;
     std::cout << "B layout: " << B_ct.layout() << std::endl;
     std::cout << "C layout: " << C_ct.layout() << std::endl;
-    std::cout << "mask layout: " << mask_ct.layout() << std::endl;
+    std::cout << "mask layout: " << mask.layout() << std::endl;
+    std::cout << "mask_T layout: " << mask_T.layout() << std::endl;
+    std::cout << "mask_table layout: " << mask_table.layout() << std::endl;
 
     cutlass::reference::host::Gemm<scalar_t, layout_A, scalar_t, layout_B, scalar_t, layout_C,
                                    ct::half_t, float>
@@ -154,7 +147,7 @@ int main(int argc, char* argv[]) {
                    ct::half_t(0), C_ref.host_ref());
     // std::cout << "C_ref" << std::endl << C_ref.host_view() << std::endl;
 
-    matmul<KernelTraits>(A_ct, B_ct, C_ct, mask_ct);
+    matmul<KernelTraits>(A_ct, B_ct, C_ct, mask);
 
     C.sync_host();
     // std::cout << "C" << std::endl << C.host_view() << std::endl;

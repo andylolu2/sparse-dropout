@@ -17,10 +17,10 @@ using ct::_;
 using ct::Int;
 
 template <typename scalar_t>
-using Gmem = ct::ViewEngine<ct::gmem_ptr<scalar_t *>>;
+using Gmem = ct::ViewEngine<ct::gmem_ptr<scalar_t*>>;
 
 template <typename scalar_t>
-using Smem = ct::ViewEngine<ct::smem_ptr<scalar_t *>>;
+using Smem = ct::ViewEngine<ct::smem_ptr<scalar_t*>>;
 
 template <typename KernelTraits, typename LayoutGaSrc, typename LayoutGaDst, typename LayoutGbSrc,
           typename LayoutGbDst, typename LayoutSa, typename LayoutSb, typename LayoutC,
@@ -237,7 +237,7 @@ __global__ void matmul_kernel(
     auto B_blk = ct::flatten(B_blk_all(_, block_idx_n, _));            // BLK_N, BLK_K, N_BLK_K
     auto C_blk = ct::flatten(C_blk_all(_, block_idx_m, block_idx_n));  // BLK_M, BLK_N
 
-    auto mask_bits = mask(block_idx_m);
+    auto mask_bits = mask(block_idx_m, _);
 
 #if 0
     if (ct::thread0()) {
@@ -267,7 +267,7 @@ __global__ void matmul_kernel(
     matmul_threadblock<KernelTraits>(A_blk, B_blk, C_blk, mask_bits);
 }
 
-template <typename KernelTraits, typename LayoutMask>
+template <typename KernelTraits>
 void matmul(
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
@@ -314,18 +314,21 @@ ct::uint128_t set_bit(ct::uint128_t mask, int8_t i, bool val = true) {
 template <typename KernelTraits>
 std::tuple<std::vector<typename KernelTraits::TMask>, std::vector<typename KernelTraits::TMask>,
            std::vector<int64_t>>
-make_mask(int64_t N_BLK_M, int64_t N_BLK_K, double p) {
+make_mask_data(int64_t M, int64_t K, double p) {
     using TMask = typename KernelTraits::TMask;
     static constexpr int TMaskBits = ct::sizeof_bits_v<TMask>;
-    auto mask_shape = ct::mask_shape(N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits));
-    auto mask_T_shape = ct::mask_shape(N_BLK_K * ct::ceil_div(N_BLK_M, TMaskBits));
+    int64_t N_BLK_M = ct::ceil_div(M, KernelTraits::BLK_M);
+    int64_t N_BLK_K = ct::ceil_div(K, KernelTraits::BLK_K);
+
+    auto mask_shape = ct::make_shape(N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits));
+    auto mask_T_shape = ct::make_shape(N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits));
     std::vector<TMask> mask_data(ct::size(mask_shape));
     std::vector<TMask> mask_T_data(ct::size(mask_T_shape));
     std::vector<int64_t> mask_table;
 
     auto mask = ct::make_tensor(mask_data.begin(), ct::make_layout(mask_shape, ct::GenRowMajor{}));
     auto mask_T =
-        ct::make_tensor(mask_T_data.begin() ct::make_layout(mask_T_shape, ct::GenRowMajor{}));
+        ct::make_tensor(mask_T_data.begin(), ct::make_layout(mask_T_shape, ct::GenRowMajor{}));
 
     for (int64_t i = 0; i < N_BLK_M; ++i) {
         for (int64_t j = 0; j < N_BLK_K; ++j) {
@@ -340,6 +343,31 @@ make_mask(int64_t N_BLK_M, int64_t N_BLK_K, double p) {
             }
         }
     }
+
+    return {mask_data, mask_T_data, mask_table};
+}
+
+template <typename KernelTraits>
+std::tuple<ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask>,
+           ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMaskT>,
+           ct::Tensor<Gmem<int64_t>, typename KernelTraits::LayoutMaskTable>>
+make_mask(typename KernelTraits::TMask* mask_data, typename KernelTraits::TMask* mask_T_data,
+          int64_t* mask_table_data, int64_t mask_table_size, int64_t M, int64_t K) {
+    using TMask = typename KernelTraits::TMask;
+    static constexpr int TMaskBits = ct::sizeof_bits_v<TMask>;
+    int64_t N_BLK_M = ct::ceil_div(M, KernelTraits::BLK_M);
+    int64_t N_BLK_K = ct::ceil_div(K, KernelTraits::BLK_K);
+
+    auto mask_shape = ct::make_shape(N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits));
+    auto mask_T_shape = ct::make_shape(N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits));
+    auto mask_table_shape = ct::make_shape(mask_table_size / Int<2>{}, Int<2>{});
+
+    auto mask = ct::make_tensor(ct::make_gmem_ptr(mask_data),
+                                ct::make_layout(mask_shape, ct::GenRowMajor{}));
+    auto mask_T = ct::make_tensor(ct::make_gmem_ptr(mask_T_data),
+                                  ct::make_layout(mask_T_shape, ct::GenRowMajor{}));
+    auto mask_table = ct::make_tensor(ct::make_gmem_ptr(mask_table_data),
+                                      ct::make_layout(mask_table_shape, ct::GenRowMajor{}));
 
     return {mask, mask_T, mask_table};
 }

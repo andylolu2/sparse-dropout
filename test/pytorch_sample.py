@@ -2,7 +2,7 @@ import torch
 
 torch.set_printoptions(sci_mode=False, precision=4, linewidth=10000, edgeitems=5)
 
-M, N, K = 1024, 1024, 1024
+M, N, K = 256, 256, 256
 
 A = torch.arange(M * K, dtype=torch.float32).reshape(M, K) / 100
 B = -torch.arange(K * N, dtype=torch.float32).reshape(K, N).T / 100

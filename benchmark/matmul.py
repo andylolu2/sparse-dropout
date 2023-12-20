@@ -4,6 +4,7 @@ import torch.types
 import triton
 import triton.testing
 
+from flash_dropout.cuda.binding import forward as blockwise_dropout_matmul_cuda
 from flash_dropout.functional.blockwise_dropout_matmul_triton import (
     blockwise_dropout_matmul,
     blockwise_dsd_matmul,
@@ -18,7 +19,7 @@ from flash_dropout.functional.utils import (
 )
 
 block_size = (64, 64)
-p = 0.1
+p = 1.0
 cache = {}
 
 
@@ -54,21 +55,25 @@ def f_triton_cached_mask(A: torch.Tensor, B: torch.Tensor):
     C = blockwise_dsd_matmul(
         A, fwd_table, fwd_header, B, BLOCK_M, BLOCK_K, scale=1 / (1 - p)
     )
-    dC = torch.zeros_like(C)
-    dA = blockwise_sdd_matmul(dC, B.T, bwd_table_1, BLOCK_M, BLOCK_K, scale=1 / (1 - p))
-    dB = blockwise_dsd_matmul(
-        A.T, bwd_table_2, bwd_header_2, dC, BLOCK_K, BLOCK_M, scale=1 / (1 - p)
-    )
+    # dC = torch.zeros_like(C)
+    # dA = blockwise_sdd_matmul(dC, B.T, bwd_table_1, BLOCK_M, BLOCK_K, scale=1 / (1 - p))
+    # dB = blockwise_dsd_matmul(
+    #     A.T, bwd_table_2, bwd_header_2, dC, BLOCK_K, BLOCK_M, scale=1 / (1 - p)
+    # )
 
 
 def f_naive(A: torch.Tensor, B: torch.Tensor):
     C = naive_blockwise_dropout_matmul(A, B, block_size, p)
-    C.backward(torch.zeros_like(C))
+    # C.backward(torch.zeros_like(C))
 
 
 def f_dense(A: torch.Tensor, B: torch.Tensor):
     C = A @ B
-    C.backward(torch.zeros_like(C))
+    # C.backward(torch.zeros_like(C))
+
+
+def f_cuda(A: torch.Tensor, B: torch.Tensor):
+    _ = blockwise_dropout_matmul_cuda(A, B, p)
 
 
 @triton.testing.perf_report(
@@ -76,9 +81,27 @@ def f_dense(A: torch.Tensor, B: torch.Tensor):
         x_names=["M", "N", "K"],
         x_vals=[i for i in range(256, 4097, 256)],
         line_arg="provider",
-        line_vals=["torch", "triton", "triton_cached", "dense"],
-        line_names=["PyTorch", "Triton", "Triton (cached)", "Dense"],
-        styles=[("green", "-"), ("blue", "-"), ("cyan", "-"), ("red", "-")],
+        line_vals=[
+            # "torch",
+            # "triton",
+            # "triton_cached",
+            "dense",
+            "cuda",
+        ],
+        line_names=[
+            # "PyTorch",
+            # "Triton",
+            # "Triton (cached)",
+            "Dense",
+            "CUDA",
+        ],
+        styles=[
+            # ("green", "-"),
+            # ("blue", "-"),
+            # ("cyan", "-"),
+            ("red", "-"),
+            ("black", "-"),
+        ],
         ylabel="TFLOPS",
         plot_name="matmul-performance",
         args={},
@@ -93,6 +116,7 @@ def benchmark(M, N, K, provider):
         "triton": f_triton,
         "triton_cached": f_triton_cached_mask,
         "dense": f_dense,
+        "cuda": f_cuda,
     }
 
     ms, min_ms, max_ms = triton.testing.do_bench(

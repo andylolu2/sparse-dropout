@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cute/tensor.hpp>
 //
 #include <cute/arch/mma_sm75.hpp>
@@ -75,9 +77,6 @@ struct KernelTraits {
         decltype(ct::composition(ct::Swizzle<2, 3, 3>{}, SmemAtomLayoutB{}));
     using SmemAtomLayoutSwizzleCanonical =
         decltype(ct::composition(ct::Swizzle<2, 3, 3>{}, SmemAtomLayoutCanonical{}));
-    // using SmemAtomLayout = decltype(ct::composition(
-    //     ct::Swizzle<2, 3, 3>{}, ct::Layout<ct::Shape<Int<SmemAtomOuter>, Int<SmemAtomInner>>,
-    //                                        ct::Stride<Int<1>, Int<SmemAtomOuter>>>{}));
     using SmemShapeA = ct::Shape<Int<BLK_M>, Int<BLK_K>>;
     using SmemShapeB = ct::Shape<Int<BLK_N>, Int<BLK_K>>;
 
@@ -109,7 +108,10 @@ struct KernelTraits {
 
     using MmaAtom = ct::MMA_Atom<ct::SM75_16x8x8_F32F16F16F32_TN>;
     using MmaThreadLayout = ct::Layout<ct::Shape<Int<2>, Int<2>, Int<1>>>;
-    using MmaValLayout = ct::Layout<ct::Shape<Int<1>, Int<2>, Int<2>>>;
+    using MmaValLayout = ct::Layout<ct::Shape<
+        Int<BLK_M / (ct::get<0>(MmaAtom::Shape_MNK{}) * ct::size<0>(MmaThreadLayout{}))>,
+        Int<BLK_N / (ct::get<1>(MmaAtom::Shape_MNK{}) * ct::size<1>(MmaThreadLayout{}))>,
+        Int<BLK_K / (ct::get<2>(MmaAtom::Shape_MNK{}) * ct::size<2>(MmaThreadLayout{}))>>>;
     CUTE_STATIC_ASSERT(ct::size_v<MmaThreadLayout> *ct::size_v<MmaAtom::ThrID> == NumThreads);
 
    public:

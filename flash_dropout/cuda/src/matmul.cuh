@@ -1,13 +1,17 @@
+#pragma once
+
 #include <cute/tensor.hpp>
 //
-#include <curand_kernel.h>
-#include <cutlass/util/device_dump.h>
+#include <torch/extension.h>
+// #include <cutlass/util/device_dump.h>
 
 #include <cute/arch/copy.hpp>
 #include <cute/arch/mma_sm75.hpp>
 #include <cute/atom/copy_atom.hpp>
 #include <cute/atom/mma_atom.hpp>
 #include <cute/numeric/integral_constant.hpp>
+#include <tuple>
+#include <vector>
 
 #include "kernel_traits.cuh"
 
@@ -225,6 +229,7 @@ __global__ void matmul_kernel(
     auto B_blk_all = ct::tiled_divide(B, BlockShapeB{});  // (BLK_N, BLK_K), N_BLK_N, N_BLK_K
     auto C_blk_all = ct::tiled_divide(C, BlockShapeC{});  // (BLK_M, BLK_N), N_BLK_M, N_BLK_N
 
+    // Threadblock swizzling
     int N_BLK_M = ct::size<1>(A_blk_all);
     int N_BLK_N = ct::size<1>(B_blk_all);
     int blocks_per_group = KernelTraits::GroupSizeM * N_BLK_N;
@@ -274,7 +279,7 @@ void matmul(
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
     ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask) {
     assert(ct::size<0>(A) == ct::size<0>(C));  // M
-    assert(ct::size<1>(B) == ct::size<0>(C));  // N
+    assert(ct::size<0>(B) == ct::size<1>(C));  // N
     assert(ct::size<1>(A) == ct::size<1>(B));  // K
 
     size_t M = ct::size<0>(A);
@@ -302,72 +307,71 @@ void matmul(
     matmul_kernel<KernelTraits><<<block_dim, thread_dim>>>(A, B, C, mask);
 }
 
-ct::uint128_t set_bit(ct::uint128_t mask, int8_t i, bool val = true) {
-    if (i < 64) {
-        mask.hilo_.lo |= (val << i);
-    } else {
-        mask.hilo_.hi |= (val << (i - 64));
-    }
-    return mask;
-}
-
 template <typename KernelTraits>
-std::tuple<std::vector<typename KernelTraits::TMask>, std::vector<typename KernelTraits::TMask>,
-           std::vector<int64_t>>
-make_mask_data(int64_t M, int64_t K, double p) {
-    using TMask = typename KernelTraits::TMask;
-    static constexpr int TMaskBits = ct::sizeof_bits_v<TMask>;
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, int64_t> make_mask(int64_t M, int64_t K,
+                                                                           double p) {
+    static constexpr int TMaskBits = 64;
     int64_t N_BLK_M = ct::ceil_div(M, KernelTraits::BLK_M);
     int64_t N_BLK_K = ct::ceil_div(K, KernelTraits::BLK_K);
 
-    auto mask_shape = ct::make_shape(N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits));
-    auto mask_T_shape = ct::make_shape(N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits));
-    std::vector<TMask> mask_data(ct::size(mask_shape));
-    std::vector<TMask> mask_T_data(ct::size(mask_T_shape));
-    std::vector<int64_t> mask_table;
+    auto mask = torch::zeros({N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits)}, torch::kInt64);
+    auto mask_T = torch::zeros({N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits)}, torch::kInt64);
+    auto mask_table = torch::zeros({N_BLK_K * N_BLK_M, 2}, torch::kInt64);
 
-    auto mask = ct::make_tensor(mask_data.begin(), ct::make_layout(mask_shape, ct::GenRowMajor{}));
-    auto mask_T =
-        ct::make_tensor(mask_T_data.begin(), ct::make_layout(mask_T_shape, ct::GenRowMajor{}));
-
+    int64_t count = 0;
     for (int64_t i = 0; i < N_BLK_M; ++i) {
         for (int64_t j = 0; j < N_BLK_K; ++j) {
             bool val = std::rand() < (p * RAND_MAX);
-
-            mask(i, j / TMaskBits) = mask(i, j / TMaskBits) | (val << (j % TMaskBits));
-            mask_T(j, i / TMaskBits) = mask_T(j, i / TMaskBits) | (val << (i % TMaskBits));
-
             if (val) {
-                mask_table.emplace_back(i);
-                mask_table.emplace_back(j);
+                int64_t mask_old = mask.index({i, j / TMaskBits}).item<int64_t>();
+                int64_t mask_new = mask_old | (uint64_t(1) << (j % TMaskBits));
+                int64_t mask_T_old = mask_T.index({j, i / TMaskBits}).item<int64_t>();
+                int64_t mask_T_new = mask_T_old | (uint64_t(1) << (i % TMaskBits));
+
+                mask.index_put_({i, j / TMaskBits}, mask_new);
+                mask_T.index_put_({j, i / TMaskBits}, mask_T_new);
+            }
+            if (!val) {
+                mask_table.index_put_({count, 0}, i);
+                mask_table.index_put_({count, 1}, j);
+                count++;
             }
         }
     }
 
-    return {mask_data, mask_T_data, mask_table};
+    return {mask, mask_T, mask_table, count};
 }
 
-template <typename KernelTraits>
-std::tuple<ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask>,
-           ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMaskT>,
-           ct::Tensor<Gmem<int64_t>, typename KernelTraits::LayoutMaskTable>>
-make_mask(typename KernelTraits::TMask* mask_data, typename KernelTraits::TMask* mask_T_data,
-          int64_t* mask_table_data, int64_t mask_table_size, int64_t M, int64_t K) {
-    using TMask = typename KernelTraits::TMask;
-    static constexpr int TMaskBits = ct::sizeof_bits_v<TMask>;
-    int64_t N_BLK_M = ct::ceil_div(M, KernelTraits::BLK_M);
-    int64_t N_BLK_K = ct::ceil_div(K, KernelTraits::BLK_K);
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, int64_t> make_mask_from_existing(
+    torch::Tensor m) {
+    static constexpr int TMaskBits = 64;
+    int64_t N_BLK_M = m.size(0);
+    int64_t N_BLK_K = m.size(1);
 
-    auto mask_shape = ct::make_shape(N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits));
-    auto mask_T_shape = ct::make_shape(N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits));
-    auto mask_table_shape = ct::make_shape(mask_table_size / Int<2>{}, Int<2>{});
+    auto mask = torch::zeros({N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits)}, torch::kInt64);
+    auto mask_T = torch::zeros({N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits)}, torch::kInt64);
+    auto mask_table = torch::zeros({N_BLK_K * N_BLK_M, 2}, torch::kInt64);
 
-    auto mask = ct::make_tensor(ct::make_gmem_ptr(mask_data),
-                                ct::make_layout(mask_shape, ct::GenRowMajor{}));
-    auto mask_T = ct::make_tensor(ct::make_gmem_ptr(mask_T_data),
-                                  ct::make_layout(mask_T_shape, ct::GenRowMajor{}));
-    auto mask_table = ct::make_tensor(ct::make_gmem_ptr(mask_table_data),
-                                      ct::make_layout(mask_table_shape, ct::GenRowMajor{}));
+    int64_t count = 0;
+    for (int64_t i = 0; i < N_BLK_M; ++i) {
+        for (int64_t j = 0; j < N_BLK_K; ++j) {
+            bool val = m.index({i, j}).item<bool>();
+            if (val) {
+                int64_t mask_old = mask.index({i, j / TMaskBits}).item<int64_t>();
+                int64_t mask_new = mask_old | (uint64_t(1) << (j % TMaskBits));
+                int64_t mask_T_old = mask_T.index({j, i / TMaskBits}).item<int64_t>();
+                int64_t mask_T_new = mask_T_old | (uint64_t(1) << (i % TMaskBits));
 
-    return {mask, mask_T, mask_table};
+                mask.index_put_({i, j / TMaskBits}, mask_new);
+                mask_T.index_put_({j, i / TMaskBits}, mask_T_new);
+            }
+            if (!val) {
+                mask_table.index_put_({count, 0}, i);
+                mask_table.index_put_({count, 1}, j);
+                count++;
+            }
+        }
+    }
+
+    return {mask, mask_T, mask_table, count};
 }

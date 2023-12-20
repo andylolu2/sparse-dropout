@@ -32,14 +32,17 @@ Extensions:
 
 Forward pass:
 - $Y = X W$
-    - Shape: `M N K`
+    - Shape: `(M N) = (M K) (N K)`
     - Layout: `Row = Row x Row`
+    - Sparsity: `Dense = Sparse x Dense`
 
 Backward pass:
 - $\frac{\partial L}{\partial X} = \frac{\partial L}{\partial Y} W^T$
-    - Shape: `M K N`
+    - Shape: `(M K) = (M N) (K N)`
     - Layout: `Row = Row x Col`
-- $\frac{\partial L}{\partial W} = X^T \frac{\partial L}{\partial Y}$
-    - Shape: `K N M`
-    - Layout: `Row = Col x Row`
+    - Sparsity: `Sparse = Dense x Dense`
+- $\frac{\partial L}{\partial W}^T = X^T \frac{\partial L}{\partial Y}^T$
+    - Shape: `(K N) = (K M) (N M)`
+    - Layout: `Col = Col x Col`
+    - Sparsity: `Dense = Sparse x Dense`
 

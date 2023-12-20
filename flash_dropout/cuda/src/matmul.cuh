@@ -29,15 +29,15 @@ using Smem = ct::ViewEngine<ct::smem_ptr<scalar_t*>>;
 template <typename KernelTraits, typename LayoutGaSrc, typename LayoutGaDst, typename LayoutGbSrc,
           typename LayoutGbDst, typename LayoutSa, typename LayoutSb, typename LayoutC,
           typename LayoutMask>
-__device__ void matmul_thread(
-    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGaSrc> gA_to_sA_src,
-    ct::Tensor<Smem<typename KernelTraits::T>, LayoutGaDst> gA_to_sA_dst,
-    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGbSrc> gB_to_sB_src,
-    ct::Tensor<Smem<typename KernelTraits::T>, LayoutGbDst> gB_to_sB_dst,
-    ct::Tensor<Smem<typename KernelTraits::T>, LayoutSa> sA,
-    ct::Tensor<Smem<typename KernelTraits::T>, LayoutSb> sB,
-    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
-    ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits) {
+__device__ void matmul_thread(ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGaSrc> gA_to_sA_src,
+                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutGaDst> gA_to_sA_dst,
+                              ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGbSrc> gB_to_sB_src,
+                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutGbDst> gB_to_sB_dst,
+                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutSa> sA,
+                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutSb> sB,
+                              ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
+                              ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits,
+                              typename KernelTraits::T scale) {
     typename KernelTraits::GmemTiledCopyA gmem_tiled_copy_A;
     typename KernelTraits::GmemTiledCopyB gmem_tiled_copy_B;
     typename KernelTraits::GmemTiledCopyC gmem_tiled_copy_C;
@@ -143,6 +143,11 @@ __device__ void matmul_thread(
 #endif
     }
 
+    // Prologue
+    for (size_t i = 0; i < ct::size(rC); ++i) {
+        rC(i) = rC(i) * scale;
+    }
+
     // Write back result
     ct::copy(gmem_tiled_copy_C, rC, gC);
 }
@@ -153,7 +158,8 @@ __device__ void matmul_threadblock(
     ct::Tensor<Gmem<typename KernelTraits::T>, LayoutA> A_blk,
     ct::Tensor<Gmem<typename KernelTraits::T>, LayoutB> B_blk,
     ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
-    ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits) {
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits,
+    typename KernelTraits::T scale) {
     typename KernelTraits::SmemLayoutA smem_layout_A;
     typename KernelTraits::SmemLayoutB smem_layout_B;
 
@@ -212,7 +218,7 @@ __device__ void matmul_threadblock(
 #endif
 
     matmul_thread<KernelTraits>(gA_to_sA_src, gA_to_sA_dst, gB_to_sB_src, gB_to_sB_dst, sA, sB,
-                                C_blk, mask_bits);
+                                C_blk, mask_bits, scale);
 }
 
 template <typename KernelTraits>
@@ -220,7 +226,8 @@ __global__ void matmul_kernel(
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
-    ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask) {
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask,
+    typename KernelTraits::T scale) {
     using BlockShapeA = typename KernelTraits::BlockShapeA;
     using BlockShapeB = typename KernelTraits::BlockShapeB;
     using BlockShapeC = typename KernelTraits::BlockShapeC;
@@ -269,15 +276,15 @@ __global__ void matmul_kernel(
     }
 #endif
 
-    matmul_threadblock<KernelTraits>(A_blk, B_blk, C_blk, mask_bits);
+    matmul_threadblock<KernelTraits>(A_blk, B_blk, C_blk, mask_bits, scale);
 }
 
 template <typename KernelTraits>
-void matmul(
-    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
-    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
-    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
-    ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask) {
+void matmul(ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
+            ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
+            ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
+            ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask,
+            typename KernelTraits::T scale) {
     assert(ct::size<0>(A) == ct::size<0>(C));  // M
     assert(ct::size<0>(B) == ct::size<1>(C));  // N
     assert(ct::size<1>(A) == ct::size<1>(B));  // K
@@ -304,7 +311,7 @@ void matmul(
     dim3 block_dim(N_BLK_M * N_BLK_N);
     dim3 thread_dim(KernelTraits::NumThreads);
 
-    matmul_kernel<KernelTraits><<<block_dim, thread_dim>>>(A, B, C, mask);
+    matmul_kernel<KernelTraits><<<block_dim, thread_dim>>>(A, B, C, mask, scale);
 }
 
 template <typename KernelTraits>

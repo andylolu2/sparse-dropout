@@ -1,36 +1,70 @@
+from functools import lru_cache
+
 import torch
 from torch.utils.cpp_extension import load
 
-# load and JIT compile the extension module
-fdropout = load(
-    name="fdropout",
-    sources=[
-        "flash_dropout/cuda/src/fdropout.cu",
-    ],
-    extra_include_paths=[
-        "flash_dropout/cuda/cutlass/include",
-        "flash_dropout/cuda/cutlass/tools/util/include",
-    ],
-    extra_cflags=["-std=c++17", "-O3"],
-    extra_cuda_cflags=["-std=c++17", "-O3", "--threads", "8"],
-    verbose=True,
-)
 
-# --- Wrappers for the extension ---
+@lru_cache(maxsize=None)
+class FlashDropoutCUDA:
+    def __init__(self, BLK_M: int, BLK_K: int):
+        """Load and JIT compile the extension module"""
+        self.ext = load(
+            name="fdropout",
+            sources=[
+                "flash_dropout/cuda/src/fdropout.cu",
+            ],
+            extra_include_paths=[
+                "flash_dropout/cuda/cutlass/include",
+                "flash_dropout/cuda/cutlass/tools/util/include",
+            ],
+            extra_cuda_cflags=[
+                "-std=c++17",
+                "-O3",
+                "--threads",
+                "8",
+                f"-DJIT_BLK_M={BLK_M}",
+                f"-DJIT_BLK_K={BLK_K}",
+            ],
+            verbose=True,
+        )
 
+    def forward(
+        self, A: torch.Tensor, B: torch.Tensor, p: float
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+        """
+        Returns:
+            C
+            mask
+            mask_T
+            mask_table
+            count
+        """
+        return self.ext.forward(A, B, p)  # type: ignore
 
-def forward(
-    A: torch.Tensor, B: torch.Tensor, p: float
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
-    C, mask, mask_T, mask_table, count = fdropout.forward(A, B, p)
-    return C, mask, mask_T, mask_table, count
+    def forward_test(
+        self, A: torch.Tensor, B: torch.Tensor, m: torch.Tensor, p: float
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+        """
+        Returns:
+            C
+            mask
+            mask_T
+            mask_table
+            count
+        """
+        return self.ext.forward_test(A, B, m, p)  # type: ignore
 
-
-def forward_test(
-    A: torch.Tensor, B: torch.Tensor, m: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
-    C, mask, mask_T, mask_table, count = fdropout.forward_test(A, B, m)
-    return C, mask, mask_T, mask_table, count
+    def backward(
+        self,
+        dC: torch.Tensor,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        mask_T: torch.Tensor,
+        mask_table: torch.Tensor,
+        p: float,
+        count: int,
+    ) -> tuple[torch.Tensor]:
+        return self.ext.backward(dC, A, B, mask_T, mask_table, p, count)  # type:ignore
 
 
 if __name__ == "__main__":
@@ -45,7 +79,9 @@ if __name__ == "__main__":
     B = torch.randn(N, K, dtype=torch.float16, device="cuda")
     p = 0.0
 
-    C, mask, mask_T, mask_table, count = forward(A, B, p)
+    ext = FlashDropoutCUDA(BLK_M=64, BLK_K=64)
+
+    C, mask, mask_T, mask_table, count = ext.forward(A, B, p)
 
     C_ref = A.float() @ B.T.float()
     C = C.float()

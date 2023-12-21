@@ -8,7 +8,8 @@
         "--gpus",
         "all",
         "--cap-add",
-        "SYS_ADMIN"
+        "SYS_ADMIN",
+        "--network=host"
     ],
     "customizations": {
         "vscode": {

@@ -13,28 +13,24 @@ from flash_dropout.functional.naive import (
 )
 
 L.seed_everything(0)
-torch.set_printoptions(sci_mode=False, edgeitems=5, linewidth=200)
+torch.set_printoptions(sci_mode=False, edgeitems=5, linewidth=5000)
 
 M, N, K = 512, 512, 512
 block_size = (64, 32)
 p = 0.5
 
 
-def ref(A: torch.Tensor, B: torch.Tensor, mask, dC):
-    A_ = A.clone().requires_grad_(True)
-    B_ = B.clone().requires_grad_(True)
-    C = blockwise_dropout(A_, mask, block_size, p) @ B_.T
-    C.backward(dC)
-    return C, A_.grad, B_.grad
+def ref(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, dC: torch.Tensor):
+    A = blockwise_dropout(A, mask, block_size, p)
+    C = A @ B.T
+    return C, blockwise_dropout(dC @ B, mask, block_size, p), dC.T @ A
 
 
-def cuda_impl(A, B, mask, dC):
-    A_ = A.clone()
-    B_ = B.clone()
+def cuda_impl(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, dC: torch.Tensor):
     ext = FlashDropoutCUDA(*block_size)
-    C, _, mask_T, mask_table, count = ext.forward_test(A_, B_, mask.to("cpu"), p)
-    dB, *_ = ext.backward(dC, A_, B_, mask_T, mask_table, p, count)
-    return C, torch.zeros_like(A_), dB
+    C, _, mask_T, mask_table, count = ext.forward_test(A, B, mask.to("cpu"), p)
+    dA, dB = ext.backward(dC, A, B, mask_T, mask_table, p, count)
+    return C, dA, dB
 
 
 A = torch.randn(M, K, device="cuda", dtype=torch.float16)
@@ -48,24 +44,29 @@ print(f"{mask=}")
 C_ref, dA_ref, dB_ref = ref(A, B, mask, dC)
 C_cuda, dA_cuda, dB_cuda = cuda_impl(A, B, mask, dC)
 
-# C = blockwise_dropout_matmul(A, B, block_size, 0.5)
-# C.backward(torch.zeros_like(C))
-
 
 def report(x_ref, x_cuda, name):
-    max_abs_err = torch.max(torch.abs(x_cuda - x_ref))
-    max_rel_err = torch.max(torch.abs((x_cuda - x_ref) / x_ref))
+    abs_err = torch.abs(x_cuda - x_ref)
+    rel_err = torch.abs((x_cuda - x_ref) / x_ref).nan_to_num()
+
+    max_abs_err_idx = torch.argmax(abs_err)
+    max_abs_err_abs = abs_err.flatten()[max_abs_err_idx].item()
+    max_abs_err_rel = rel_err.flatten()[max_abs_err_idx].item()
+
+    max_rel_err_idx = torch.argmax(rel_err)
+    max_rel_err_abs = abs_err.flatten()[max_rel_err_idx].item()
+    max_rel_err_rel = rel_err.flatten()[max_rel_err_idx].item()
 
     print(f"{name}:")
     print("Reference:")
     print(x_ref)
     print("CUDA:")
     print(x_cuda)
-    print(f"{max_abs_err=}")
-    print(f"{max_rel_err=}")
+    print(f"{max_abs_err_abs=} {max_abs_err_rel=:.1%}")
+    print(f"{max_rel_err_abs=} {max_rel_err_rel=:.1%}")
     print()
 
 
 report(C_ref, C_cuda, "C")
-# report(dA_ref, dA_cuda, "dA")
+report(dA_ref, dA_cuda, "dA")
 report(dB_ref, dB_cuda, "dB")

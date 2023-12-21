@@ -34,7 +34,6 @@ struct KernelTraits {
         ct::Shape<int64_t, int64_t>,
         std::conditional_t<RowMajorC, ct::Stride<int64_t, Int<1>>, ct::Stride<Int<1>, int64_t>>>;
     using LayoutMask = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<int64_t, Int<1>>>;
-    using LayoutMaskT = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<int64_t, Int<1>>>;
     using LayoutMaskTable = ct::Layout<ct::Shape<int64_t, Int<2>>, ct::Stride<Int<2>, Int<1>>>;
 
    private:

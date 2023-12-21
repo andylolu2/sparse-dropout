@@ -17,7 +17,7 @@ from flash_dropout.types import size
 @triton.autotune(
     configs=config_product(
         num_warps=[1, 2],
-        num_stages=[1, 2],
+        num_stages=[1],
         BLOCK_N=[32, 64, 128],
         GROUP_M=[8],
     ),
@@ -112,7 +112,7 @@ def blockwise_dsd_matmul_kernel(
 @triton.autotune(
     configs=config_product(
         num_warps=[1, 2],
-        num_stages=[1, 2],
+        num_stages=[1],
         BLOCK_N=[32, 64, 128],
         GROUP_M=[8],
     ),

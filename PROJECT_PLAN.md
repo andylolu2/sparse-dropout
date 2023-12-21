@@ -41,7 +41,7 @@ Backward pass:
     - Shape: `(M K) = (M N) (K N)`
     - Layout: `Row = Row x Col`
     - Sparsity: `Sparse = Dense x Dense`
-- $\frac{\partial L}{\partial W}^T = X^T \frac{\partial L}{\partial Y}^T$
+- $\frac{\partial L}{\partial W}^T = X^T \frac{\partial L}{\partial Y}$
     - Shape: `(K N) = (K M) (N M)`
     - Layout: `Col = Col x Col`
     - Sparsity: `Dense = Sparse x Dense`

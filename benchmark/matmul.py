@@ -4,7 +4,9 @@ import torch.types
 import triton
 import triton.testing
 
-from flash_dropout.cuda.binding import forward as blockwise_dropout_matmul_cuda
+from flash_dropout.functional.blockwise_dropout_matmul_cuda import (
+    blockwise_dropout_matmul as blockwise_dropout_matmul_cuda,
+)
 from flash_dropout.functional.blockwise_dropout_matmul_triton import (
     blockwise_dropout_matmul,
     blockwise_dsd_matmul,
@@ -19,7 +21,7 @@ from flash_dropout.functional.utils import (
 )
 
 block_size = (64, 64)
-p = 1.0
+p = 0.5
 cache = {}
 
 
@@ -64,39 +66,40 @@ def f_triton_cached_mask(A: torch.Tensor, B: torch.Tensor):
 
 def f_naive(A: torch.Tensor, B: torch.Tensor):
     C = naive_blockwise_dropout_matmul(A, B, block_size, p)
-    # C.backward(torch.zeros_like(C))
+    C.backward(torch.zeros_like(C))
 
 
 def f_dense(A: torch.Tensor, B: torch.Tensor):
     C = A @ B
-    # C.backward(torch.zeros_like(C))
+    C.backward(torch.zeros_like(C))
 
 
 def f_cuda(A: torch.Tensor, B: torch.Tensor):
-    _ = blockwise_dropout_matmul_cuda(A, B, p)
+    C = blockwise_dropout_matmul_cuda(A, B, block_size, p)
+    C.backward(torch.zeros_like(C))
 
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=["M", "N", "K"],
-        x_vals=[i for i in range(256, 4097, 256)],
+        x_vals=range(256, 1024 + 1, 256),
         line_arg="provider",
         line_vals=[
-            # "torch",
+            "torch",
             # "triton",
             # "triton_cached",
             "dense",
             "cuda",
         ],
         line_names=[
-            # "PyTorch",
+            "PyTorch",
             # "Triton",
             # "Triton (cached)",
             "Dense",
             "CUDA",
         ],
         styles=[
-            # ("green", "-"),
+            ("green", "-"),
             # ("blue", "-"),
             # ("cyan", "-"),
             ("red", "-"),

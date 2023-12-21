@@ -2,7 +2,6 @@
 
 #include <cute/tensor.hpp>
 //
-#include <torch/extension.h>
 // #include <cutlass/util/device_dump.h>
 
 #include <cute/arch/copy.hpp>
@@ -29,15 +28,16 @@ using Smem = ct::ViewEngine<ct::smem_ptr<scalar_t*>>;
 template <typename KernelTraits, typename LayoutGaSrc, typename LayoutGaDst, typename LayoutGbSrc,
           typename LayoutGbDst, typename LayoutSa, typename LayoutSb, typename LayoutC,
           typename LayoutMask>
-__device__ void matmul_thread(ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGaSrc> gA_to_sA_src,
-                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutGaDst> gA_to_sA_dst,
-                              ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGbSrc> gB_to_sB_src,
-                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutGbDst> gB_to_sB_dst,
-                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutSa> sA,
-                              ct::Tensor<Smem<typename KernelTraits::T>, LayoutSb> sB,
-                              ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
-                              ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits,
-                              typename KernelTraits::T scale) {
+__device__ void matmul_dsd_thread(
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGaSrc> gA_to_sA_src,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutGaDst> gA_to_sA_dst,
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutGbSrc> gB_to_sB_src,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutGbDst> gB_to_sB_dst,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutSa> sA,
+    ct::Tensor<Smem<typename KernelTraits::T>, LayoutSb> sB,
+    ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, LayoutMask> mask_bits,
+    typename KernelTraits::T scale) {
     typename KernelTraits::GmemTiledCopyA gmem_tiled_copy_A;
     typename KernelTraits::GmemTiledCopyB gmem_tiled_copy_B;
     typename KernelTraits::GmemTiledCopyC gmem_tiled_copy_C;
@@ -144,6 +144,7 @@ __device__ void matmul_thread(ct::Tensor<Gmem<typename KernelTraits::T>, LayoutG
     }
 
     // Prologue
+#pragma unroll
     for (size_t i = 0; i < ct::size(rC); ++i) {
         rC(i) = rC(i) * scale;
     }
@@ -154,7 +155,7 @@ __device__ void matmul_thread(ct::Tensor<Gmem<typename KernelTraits::T>, LayoutG
 
 template <typename KernelTraits, typename LayoutA, typename LayoutB, typename LayoutC,
           typename LayoutMask>
-__device__ void matmul_threadblock(
+__device__ void matmul_dsd_threadblock(
     ct::Tensor<Gmem<typename KernelTraits::T>, LayoutA> A_blk,
     ct::Tensor<Gmem<typename KernelTraits::T>, LayoutB> B_blk,
     ct::Tensor<Gmem<typename KernelTraits::T>, LayoutC> C_blk,
@@ -217,12 +218,12 @@ __device__ void matmul_threadblock(
     }
 #endif
 
-    matmul_thread<KernelTraits>(gA_to_sA_src, gA_to_sA_dst, gB_to_sB_src, gB_to_sB_dst, sA, sB,
-                                C_blk, mask_bits, scale);
+    matmul_dsd_thread<KernelTraits>(gA_to_sA_src, gA_to_sA_dst, gB_to_sB_src, gB_to_sB_dst, sA, sB,
+                                    C_blk, mask_bits, scale);
 }
 
 template <typename KernelTraits>
-__global__ void matmul_kernel(
+__global__ void matmul_dsd_kernel(
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
     ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
@@ -276,15 +277,16 @@ __global__ void matmul_kernel(
     }
 #endif
 
-    matmul_threadblock<KernelTraits>(A_blk, B_blk, C_blk, mask_bits, scale);
+    matmul_dsd_threadblock<KernelTraits>(A_blk, B_blk, C_blk, mask_bits, scale);
 }
 
 template <typename KernelTraits>
-void matmul(ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
-            ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
-            ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
-            ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask,
-            typename KernelTraits::T scale) {
+void matmul_dsd(
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutA> A,
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutB> B,
+    ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::LayoutC> C,
+    ct::Tensor<Gmem<typename KernelTraits::TMask>, typename KernelTraits::LayoutMask> mask,
+    typename KernelTraits::T scale) {
     assert(ct::size<0>(A) == ct::size<0>(C));  // M
     assert(ct::size<0>(B) == ct::size<1>(C));  // N
     assert(ct::size<1>(A) == ct::size<1>(B));  // K
@@ -311,74 +313,5 @@ void matmul(ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits::La
     dim3 block_dim(N_BLK_M * N_BLK_N);
     dim3 thread_dim(KernelTraits::NumThreads);
 
-    matmul_kernel<KernelTraits><<<block_dim, thread_dim>>>(A, B, C, mask, scale);
-}
-
-template <typename KernelTraits>
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, int64_t> make_mask(int64_t M, int64_t K,
-                                                                           double p) {
-    static constexpr int TMaskBits = 64;
-    int64_t N_BLK_M = ct::ceil_div(M, KernelTraits::BLK_M);
-    int64_t N_BLK_K = ct::ceil_div(K, KernelTraits::BLK_K);
-
-    auto mask = torch::zeros({N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits)}, torch::kInt64);
-    auto mask_T = torch::zeros({N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits)}, torch::kInt64);
-    auto mask_table = torch::zeros({N_BLK_K * N_BLK_M, 2}, torch::kInt64);
-
-    int64_t count = 0;
-    for (int64_t i = 0; i < N_BLK_M; ++i) {
-        for (int64_t j = 0; j < N_BLK_K; ++j) {
-            bool val = std::rand() < (p * RAND_MAX);
-            if (val) {
-                int64_t mask_old = mask.index({i, j / TMaskBits}).item<int64_t>();
-                int64_t mask_new = mask_old | (uint64_t(1) << (j % TMaskBits));
-                int64_t mask_T_old = mask_T.index({j, i / TMaskBits}).item<int64_t>();
-                int64_t mask_T_new = mask_T_old | (uint64_t(1) << (i % TMaskBits));
-
-                mask.index_put_({i, j / TMaskBits}, mask_new);
-                mask_T.index_put_({j, i / TMaskBits}, mask_T_new);
-            }
-            if (!val) {
-                mask_table.index_put_({count, 0}, i);
-                mask_table.index_put_({count, 1}, j);
-                count++;
-            }
-        }
-    }
-
-    return {mask, mask_T, mask_table, count};
-}
-
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, int64_t> make_mask_from_existing(
-    torch::Tensor m) {
-    static constexpr int TMaskBits = 64;
-    int64_t N_BLK_M = m.size(0);
-    int64_t N_BLK_K = m.size(1);
-
-    auto mask = torch::zeros({N_BLK_M, ct::ceil_div(N_BLK_K, TMaskBits)}, torch::kInt64);
-    auto mask_T = torch::zeros({N_BLK_K, ct::ceil_div(N_BLK_M, TMaskBits)}, torch::kInt64);
-    auto mask_table = torch::zeros({N_BLK_K * N_BLK_M, 2}, torch::kInt64);
-
-    int64_t count = 0;
-    for (int64_t i = 0; i < N_BLK_M; ++i) {
-        for (int64_t j = 0; j < N_BLK_K; ++j) {
-            bool val = m.index({i, j}).item<bool>();
-            if (val) {
-                int64_t mask_old = mask.index({i, j / TMaskBits}).item<int64_t>();
-                int64_t mask_new = mask_old | (uint64_t(1) << (j % TMaskBits));
-                int64_t mask_T_old = mask_T.index({j, i / TMaskBits}).item<int64_t>();
-                int64_t mask_T_new = mask_T_old | (uint64_t(1) << (i % TMaskBits));
-
-                mask.index_put_({i, j / TMaskBits}, mask_new);
-                mask_T.index_put_({j, i / TMaskBits}, mask_T_new);
-            }
-            if (!val) {
-                mask_table.index_put_({count, 0}, i);
-                mask_table.index_put_({count, 1}, j);
-                count++;
-            }
-        }
-    }
-
-    return {mask, mask_T, mask_table, count};
+    matmul_dsd_kernel<KernelTraits><<<block_dim, thread_dim>>>(A, B, C, mask, scale);
 }

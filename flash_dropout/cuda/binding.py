@@ -6,7 +6,17 @@ from torch.utils.cpp_extension import load
 
 @lru_cache(maxsize=None)
 class FlashDropoutCUDA:
-    def __init__(self, BLK_M: int, BLK_K: int):
+    def __init__(
+        self,
+        BLK_M: int,
+        BLK_N_0: int,
+        BLK_N_1: int,
+        BLK_N_2: int,
+        BLK_K: int,
+        GROUP_0: int,
+        GROUP_1: int,
+        GROUP_2: int,
+    ):
         """Load and JIT compile the extension module"""
         self.ext = load(
             name="fdropout",
@@ -23,7 +33,13 @@ class FlashDropoutCUDA:
                 "--threads",
                 "8",
                 f"-DJIT_BLK_M={BLK_M}",
+                f"-DJIT_BLK_N_0={BLK_N_0}",
+                f"-DJIT_BLK_N_1={BLK_N_1}",
+                f"-DJIT_BLK_N_2={BLK_N_2}",
                 f"-DJIT_BLK_K={BLK_K}",
+                f"-DJIT_GROUP_0={GROUP_0}",
+                f"-DJIT_GROUP_1={GROUP_1}",
+                f"-DJIT_GROUP_2={GROUP_2}",
             ],
             verbose=True,
         )
@@ -41,6 +57,29 @@ class FlashDropoutCUDA:
         """
         return self.ext.forward(A, B, p)  # type: ignore
 
+    def backward_dA(
+        self,
+        dC: torch.Tensor,
+        B: torch.Tensor,
+        mask_table: torch.Tensor,
+        p: float,
+        count: int,
+    ) -> torch.Tensor:
+        """
+        Returns:
+            dA
+        """
+        return self.ext.backward_dA(dC, B, mask_table, p, count)  # type: ignore
+
+    def backward_dB(
+        self, dC: torch.Tensor, A: torch.Tensor, mask_T: torch.Tensor, p: float
+    ) -> torch.Tensor:
+        """
+        Returns:
+            dB
+        """
+        return self.ext.backward_dB(dC, A, mask_T, p)  # type: ignore
+
     def forward_test(
         self, A: torch.Tensor, B: torch.Tensor, m: torch.Tensor, p: float
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
@@ -53,18 +92,6 @@ class FlashDropoutCUDA:
             count
         """
         return self.ext.forward_test(A, B, m, p)  # type: ignore
-
-    def backward(
-        self,
-        dC: torch.Tensor,
-        A: torch.Tensor,
-        B: torch.Tensor,
-        mask_T: torch.Tensor,
-        mask_table: torch.Tensor,
-        p: float,
-        count: int,
-    ) -> tuple[torch.Tensor]:
-        return self.ext.backward(dC, A, B, mask_T, mask_table, p, count)  # type:ignore
 
 
 if __name__ == "__main__":

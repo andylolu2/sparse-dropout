@@ -28,7 +28,7 @@ class DropoutMM(nn.Module):
         self.variant = variant
         self.kwargs = kwargs
 
-        self.weight = nn.Parameter(torch.empty(out_features, in_features).T)
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -36,19 +36,23 @@ class DropoutMM(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         if not self.training:
-            return input @ self.weight
+            return nn.functional.linear(input, self.weight)
 
         match self.variant:
             case "none":
-                return input @ self.weight
+                return nn.functional.linear(input, self.weight)
             case "vanilla":
-                return F.vanilla_dropout_matmul(input, self.weight, self.p)
+                return F.vanilla_dropout_matmul(input, self.weight.T, self.p)
             case "blockwise[naive]":
                 return F.naive_blockwise_dropout_matmul(
-                    input, self.weight, self.kwargs["block_size"], self.p
+                    input, self.weight.T, self.kwargs["block_size"], self.p
                 )
-            case v if v in ("blockwise", "blockwise[triton]"):
+            case "blockwise[triton]":
                 return F.triton_blockwise_dropout_matmul(
+                    input, self.weight.T, self.kwargs["block_size"], self.p
+                )
+            case "blockwise[cuda]":
+                return F.cuda_blockwise_dropout_matmul(
                     input, self.weight, self.kwargs["block_size"], self.p
                 )
             case _:

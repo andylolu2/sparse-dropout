@@ -7,16 +7,16 @@ def get_config():
     config.seed = 0
     config.fabric = dict(
         accelerator="auto",
-        precision="16-mixed",
+        precision="16-true",
     )
 
     config.model = dict(
-        num_layers=3,
+        num_layers=5,
         hidden_dim=512,
         output_dim=10,
-        variant="vanilla",
-        p=0.1,
-        block_size=(32, 64),
+        variant="blockwise[cuda]",
+        p=0.0,
+        block_size=(128, 128),
     )
 
     config.train = dict(
@@ -25,10 +25,10 @@ def get_config():
     )
 
     config.data = dict(
-        train_batch_size=128,
-        val_batch_size=128,
-        train_size=1024,
-        val_size=1024,
+        train_batch_size=512,
+        val_batch_size=512,
+        train_size=4096,
+        val_size=8192,
     )
 
     return config

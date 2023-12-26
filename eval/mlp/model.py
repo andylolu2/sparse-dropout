@@ -19,11 +19,14 @@ class BasicNet(nn.Module):
         assert num_layers >= 1
 
         self.layers = nn.ModuleList([nn.Flatten()])
-
         dims = [sample[0].numel(), *([hidden_dim] * (num_layers - 1)), output_dim]
-        for in_dim, out_dim in zip(dims[:-2], dims[1:-1]):
-            self.layers += [DropoutMM(in_dim, out_dim, p, variant, **kwargs), nn.ReLU()]
-        self.layers += [DropoutMM(dims[-2], dims[-1], p, variant, **kwargs)]
+        for i, (in_dim, out_dim) in enumerate(zip(dims[:-2], dims[1:-1])):
+            if i == 0:
+                self.layers.append(nn.Linear(in_dim, out_dim))
+            else:
+                self.layers.append(DropoutMM(in_dim, out_dim, p, variant, **kwargs))
+            self.layers.append(nn.ReLU())
+        self.layers += [nn.Linear(dims[-2], dims[-1])]
 
     def forward(self, x: torch.Tensor):
         for layer in self.layers:

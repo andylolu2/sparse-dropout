@@ -27,7 +27,7 @@ def main(_):
     train_loader = dm.train_dataloader()
     val_loader = dm.val_dataloader()
     model = BasicNet(dm.train_samlpe[0], **config.model)
-    optimizer = Adam(model.parameters(), lr=config.train.lr)
+    optimizer = Adam(model.parameters(), lr=config.train.lr, eps=1e-4)
 
     # Setup objects
     model, optimizer = fabric.setup(model, optimizer)

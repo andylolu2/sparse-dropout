@@ -15,9 +15,10 @@ from flash_dropout.functional.naive import (
 L.seed_everything(0)
 torch.set_printoptions(sci_mode=False, edgeitems=5, linewidth=5000)
 
-M, N, K = 512, 512, 512
-block_size = (64, 32)
-p = 0.5
+M, N, K = 1024, 1024, 1024
+# M, N, K = 128 * 32, 512 * 4, 512
+block_size = (128, 128)
+p = 0.0
 
 
 def ref(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, dC: torch.Tensor):
@@ -27,9 +28,14 @@ def ref(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, dC: torch.Tensor):
 
 
 def cuda_impl(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, dC: torch.Tensor):
-    ext = FlashDropoutCUDA(*block_size)
-    C, _, mask_T, mask_table, count = ext.forward_test(A, B, mask.to("cpu"), p)
-    dA, dB = ext.backward(dC, A, B, mask_T, mask_table, p, count)
+    impl = FlashDropoutCUDA(
+        BLK_MNK_GROUP_0=(128, 128, 64, 5),
+        BLK_MNK_GROUP_1=(128, 64, 128, 5),
+        BLK_MNK_GROUP_2=(64, 128, 128, 5),
+    )
+    C, _, mask_T, mask_table, count = impl.forward_test(A, B, mask.to("cpu"), p)
+    dA = impl.backward_dA(dC, B, mask_table, p, count)
+    dB = impl.backward_dB(dC, A, mask_T, p)
     return C, dA, dB
 
 
@@ -38,7 +44,7 @@ B = torch.randn(N, K, device="cuda", dtype=torch.float16)
 dC = torch.randn(M, N, device="cuda", dtype=torch.float16)
 
 mask = blockwise_dropout_mask(A, block_size, p)
-print(f"{mask=}")
+print(f"{mask.shape=}\n{mask=}")
 
 
 C_ref, dA_ref, dB_ref = ref(A, B, mask, dC)

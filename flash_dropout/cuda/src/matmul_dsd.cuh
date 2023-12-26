@@ -109,9 +109,9 @@ __device__ void matmul_dsd_thread(
         if (k_blk % ct::sizeof_bits_v<TMask> == 0) {
             mask_bit_pack = mask_bits(k_blk / ct::sizeof_bits_v<TMask>);
         }
-        bool drop_block = (mask_bit_pack & 1) == 1;
+        bool drop = (mask_bit_pack & 1) == 1;
         mask_bit_pack = mask_bit_pack >> 1;
-        if (drop_block) {
+        if (drop) {
             continue;
         }
 

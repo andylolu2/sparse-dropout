@@ -1,3 +1,6 @@
+from .blockwise_dropout_matmul_cuda import (
+    blockwise_dropout_matmul as cuda_blockwise_dropout_matmul,
+)
 from .blockwise_dropout_matmul_triton import (
     blockwise_dropout_matmul as triton_blockwise_dropout_matmul,
 )

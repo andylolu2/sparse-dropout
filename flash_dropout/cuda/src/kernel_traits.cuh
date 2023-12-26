@@ -21,7 +21,8 @@ struct KernelTraits {
     static constexpr int BLK_M = BLK_M_;
     static constexpr int BLK_N = BLK_N_;
     static constexpr int BLK_K = BLK_K_;
-    static constexpr int NumThreads = 128;
+    static constexpr int NumWarps = 4;
+    static constexpr int NumThreads = 32 * NumWarps;
     static constexpr int GroupSizeM = GroupSizeM_;
     using LayoutA = ct::Layout<
         ct::Shape<int64_t, int64_t>,
@@ -98,11 +99,8 @@ struct KernelTraits {
         ct::size_v<GmemCopyThreadLayoutB> *ct::size_v<typename GmemCopyAtom::ThrID> == NumThreads);
 
     using MmaAtom = ct::MMA_Atom<ct::SM75_16x8x8_F32F16F16F32_TN>;
-    using MmaThreadLayout = ct::Layout<ct::Shape<Int<2>, Int<2>, Int<1>>>;
-    using MmaValLayout = ct::Layout<ct::Shape<
-        Int<BLK_M / (ct::get<0>(MmaAtom::Shape_MNK{}) * ct::size<0>(MmaThreadLayout{}))>,
-        Int<BLK_N / (ct::get<1>(MmaAtom::Shape_MNK{}) * ct::size<1>(MmaThreadLayout{}))>,
-        Int<BLK_K / (ct::get<2>(MmaAtom::Shape_MNK{}) * ct::size<2>(MmaThreadLayout{}))>>>;
+    using MmaThreadLayout = ct::Layout<ct::Shape<Int<NumWarps>, Int<1>, Int<1>>>;
+    using MmaValLayout = ct::Layout<ct::Shape<Int<1>, Int<2>, Int<2>>>;
     CUTE_STATIC_ASSERT(ct::size_v<MmaThreadLayout> *ct::size_v<MmaAtom::ThrID> == NumThreads);
 
    public:

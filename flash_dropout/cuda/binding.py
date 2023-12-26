@@ -8,16 +8,14 @@ from torch.utils.cpp_extension import load
 class FlashDropoutCUDA:
     def __init__(
         self,
-        BLK_M: int,
-        BLK_N_0: int,
-        BLK_N_1: int,
-        BLK_N_2: int,
-        BLK_K: int,
-        GROUP_0: int,
-        GROUP_1: int,
-        GROUP_2: int,
+        BLK_MNK_GROUP_0: tuple[int, int, int, int],
+        BLK_MNK_GROUP_1: tuple[int, int, int, int],
+        BLK_MNK_GROUP_2: tuple[int, int, int, int],
     ):
         """Load and JIT compile the extension module"""
+        BLK_M_0, BLK_N_0, BLK_K_0, GROUP_0 = BLK_MNK_GROUP_0
+        BLK_M_1, BLK_N_1, BLK_K_1, GROUP_1 = BLK_MNK_GROUP_1
+        BLK_M_2, BLK_N_2, BLK_K_2, GROUP_2 = BLK_MNK_GROUP_2
         self.ext = load(
             name="fdropout",
             sources=[
@@ -32,14 +30,18 @@ class FlashDropoutCUDA:
                 "-O3",
                 "--threads",
                 "8",
-                f"-DJIT_BLK_M={BLK_M}",
-                f"-DJIT_BLK_N_0={BLK_N_0}",
-                f"-DJIT_BLK_N_1={BLK_N_1}",
-                f"-DJIT_BLK_N_2={BLK_N_2}",
-                f"-DJIT_BLK_K={BLK_K}",
-                f"-DJIT_GROUP_0={GROUP_0}",
-                f"-DJIT_GROUP_1={GROUP_1}",
-                f"-DJIT_GROUP_2={GROUP_2}",
+                f"-DJIT_{BLK_M_0=}",
+                f"-DJIT_{BLK_N_0=}",
+                f"-DJIT_{BLK_K_0=}",
+                f"-DJIT_{GROUP_0=}",
+                f"-DJIT_{BLK_M_1=}",
+                f"-DJIT_{BLK_N_1=}",
+                f"-DJIT_{BLK_K_1=}",
+                f"-DJIT_{GROUP_1=}",
+                f"-DJIT_{BLK_M_2=}",
+                f"-DJIT_{BLK_N_2=}",
+                f"-DJIT_{BLK_K_2=}",
+                f"-DJIT_{GROUP_2=}",
             ],
             verbose=True,
         )
@@ -100,13 +102,17 @@ if __name__ == "__main__":
     L.seed_everything(0)
     torch.set_printoptions(sci_mode=False, edgeitems=5, linewidth=120)
 
-    M, N, K = 1024, 1024, 1024
+    M, N, K = 512, 512, 512
 
     A = torch.randn(M, K, dtype=torch.float16, device="cuda")
     B = torch.randn(N, K, dtype=torch.float16, device="cuda")
     p = 0.0
 
-    ext = FlashDropoutCUDA(BLK_M=64, BLK_K=64)
+    ext = FlashDropoutCUDA(
+        BLK_MNK_GROUP_0=(128, 128, 64, 5),
+        BLK_MNK_GROUP_1=(128, 64, 128, 5),
+        BLK_MNK_GROUP_2=(64, 128, 128, 5),
+    )
 
     C, mask, mask_T, mask_table, count = ext.forward(A, B, p)
 

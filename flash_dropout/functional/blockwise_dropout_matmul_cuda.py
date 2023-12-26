@@ -15,8 +15,12 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
     ):
         assert 0 <= p < 1, "Dropout probability must be in [0, 1)"
 
-        BLK_M, BLK_K = block_size
-        impl = FlashDropoutCUDA(BLK_M, BLK_K)
+        # BLK_M, BLK_K = block_size
+        impl = FlashDropoutCUDA(
+            BLK_MNK_GROUP_0=(128, 128, 32, 5),
+            BLK_MNK_GROUP_1=(128, 32, 128, 5),
+            BLK_MNK_GROUP_2=(32, 128, 128, 5),
+        )
         C, mask, mask_T, mask_table, count = impl.forward(input, weight, p)
 
         ctx.save_for_backward(input, weight, mask_T, mask_table)
@@ -32,14 +36,17 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
         grad_output: torch.Tensor,
     ):
         input, weight, mask_T, mask_table = ctx.saved_tensors
-        BLK_M, BLK_K = ctx.block_size
+        # BLK_M, BLK_K = ctx.block_size
         count = ctx.count
         p = ctx.p
 
-        impl = FlashDropoutCUDA(BLK_M, BLK_K)
-        grad_input, grad_weight = impl.backward(
-            grad_output, input, weight, mask_T, mask_table, p, count
+        impl = FlashDropoutCUDA(
+            BLK_MNK_GROUP_0=(128, 128, 32, 5),
+            BLK_MNK_GROUP_1=(128, 32, 128, 5),
+            BLK_MNK_GROUP_2=(32, 128, 128, 5),
         )
+        grad_input = impl.backward_dA(grad_output, weight, mask_table, p, count)
+        grad_weight = impl.backward_dB(grad_output, input, mask_T, p)
 
         return grad_input, grad_weight, None, None
 

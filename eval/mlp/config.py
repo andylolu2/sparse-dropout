@@ -7,12 +7,12 @@ def get_config():
     config.seed = 0
     config.fabric = dict(
         accelerator="auto",
-        precision="16-true",
+        precision="16-mixed",
     )
 
     config.model = dict(
-        num_layers=5,
-        hidden_dim=512,
+        num_layers=4,
+        hidden_dim=2048,
         output_dim=10,
         variant="blockwise[cuda]",
         p=0.0,

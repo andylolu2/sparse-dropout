@@ -38,22 +38,28 @@ class DropoutMM(nn.Module):
         if not self.training:
             return nn.functional.linear(input, self.weight)
 
+        shape = input.shape
+        input = input.view(-1, shape[-1])
+
         match self.variant:
             case "none":
-                return nn.functional.linear(input, self.weight)
+                output = nn.functional.linear(input, self.weight)
             case "vanilla":
-                return F.vanilla_dropout_matmul(input, self.weight.T, self.p)
+                output = F.vanilla_dropout_matmul(input, self.weight, self.p)
             case "blockwise[naive]":
-                return F.naive_blockwise_dropout_matmul(
-                    input, self.weight.T, self.kwargs["block_size"], self.p
+                output = F.naive_blockwise_dropout_matmul(
+                    input, self.weight, self.kwargs["block_size"], self.p
                 )
             case "blockwise[triton]":
-                return F.triton_blockwise_dropout_matmul(
+                output = F.triton_blockwise_dropout_matmul(
                     input, self.weight.T, self.kwargs["block_size"], self.p
                 )
             case "blockwise[cuda]":
-                return F.cuda_blockwise_dropout_matmul(
+                output = F.cuda_blockwise_dropout_matmul(
                     input, self.weight, self.kwargs["block_size"], self.p
                 )
             case _:
                 raise ValueError(f"Unknown variant {self.variant}")
+
+        output = output.view(*shape[:-1], self.out_features)
+        return output

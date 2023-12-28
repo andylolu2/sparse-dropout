@@ -32,3 +32,6 @@ logs/
 
 # cuda
 flash_dropout/cuda/build
+
+# wandb
+wandb/

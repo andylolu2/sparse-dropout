@@ -22,7 +22,7 @@ from flash_dropout.functional.utils import (
     mask_to_increment_table,
 )
 
-block_size = (256, 128)
+block_size = (128, 128)
 
 
 def f_naive(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
@@ -60,9 +60,9 @@ def f_baseline(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
 
 def f_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
     impl = FlashDropoutCUDA(
-        BLK_MNK_GROUP_0=(128, 128, 32, 5),
-        BLK_MNK_GROUP_1=(128, 32, 128, 5),
-        BLK_MNK_GROUP_2=(32, 128, 128, 5),
+        BLK_MNK_GROUP_0=(128, 128, 64, 5),
+        BLK_MNK_GROUP_1=(128, 64, 128, 5),
+        BLK_MNK_GROUP_2=(64, 128, 128, 5),
     )
 
     C, mask, mask_T, mask_table, count = impl.forward(A, B, p)
@@ -134,9 +134,12 @@ if __name__ == "__main__":
 
     L.seed_everything(0)
 
-    M, N, K = 128 * 16, 512 * 4, 512
-    M, N, K = 128 * 16, 512, 512 * 4
-    # M, N, K = 4096, 4096, 4096
+    b = 4
+    s = 256
+    d = 512
+    M, N, K = b * s, d * 4, d
+    # M, N, K = b * s, d, d * 4
+    M, N, K = b * s, d, 3 * d
 
     A = torch.randn((M, K), device="cuda", dtype=torch.float16)
     B = torch.randn((N, K), device="cuda", dtype=torch.float16)
@@ -162,7 +165,7 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(data)
 
-    sns.barplot(df, x="breakpoint", y="time", hue="name")
+    sns.barplot(df, x="breakpoint", y="time", hue="name", errorbar="sd")
     plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
     plt.tight_layout()
-    plt.savefig("./logs/matmul-detailed_8.png", dpi=300)
+    plt.savefig(f"./logs/matmul-detailed_m{M}n{N}k{K}.png", dpi=300)

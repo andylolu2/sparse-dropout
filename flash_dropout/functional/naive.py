@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import torch.types
 
 from flash_dropout.types import size
@@ -40,4 +41,4 @@ def blockwise_dropout_matmul(
 ):
     mask = blockwise_dropout_mask(input, block_size, p)
     input = blockwise_dropout(input, mask, block_size, p)
-    return input @ weight
+    return F.linear(input, weight)

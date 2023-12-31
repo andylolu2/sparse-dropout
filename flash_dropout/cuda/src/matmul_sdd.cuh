@@ -133,13 +133,11 @@ __global__ void matmul_sdd_kernel(
     auto B_blk_all = ct::tiled_divide(B, BlockShapeB{});  // (BLK_N, BLK_K), N_BLK_N, N_BLK_K
     auto C_blk_all = ct::tiled_divide(C, BlockShapeC{});  // (BLK_M, BLK_N), N_BLK_M, N_BLK_N
 
-    // auto block_indices = ct::make_tensor<ct::int64_t>(ct::make_shape(Int<2>{}));
-    // ct::Copy_Atom<ct::AutoVectorizingCopyWithAssumedAlignment<128>, ct::int64_t> copy_atom;
-    // ct::copy(copy_atom, mask_table(blockIdx.x, _), block_indices);
-    // int64_t block_idx_m = block_indices(0);
-    // int64_t block_idx_n = block_indices(1);
-    int64_t block_idx_m = 0;
-    int64_t block_idx_n = 0;
+    auto block_indices = ct::make_tensor<ct::int64_t>(ct::make_shape(Int<2>{}));
+    ct::Copy_Atom<ct::AutoVectorizingCopyWithAssumedAlignment<128>, ct::int64_t> copy_atom;
+    ct::copy(copy_atom, mask_table(blockIdx.x, _), block_indices);
+    int64_t block_idx_m = block_indices(0);
+    int64_t block_idx_n = block_indices(1);
 
     auto A_blk = ct::flatten(A_blk_all(_, block_idx_m, _));            // BLK_M, BLK_K, N_BLK_K
     auto B_blk = ct::flatten(B_blk_all(_, block_idx_n, _));            // BLK_N, BLK_K, N_BLK_K

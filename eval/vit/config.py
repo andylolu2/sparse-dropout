@@ -13,18 +13,17 @@ def get_config():
         precision="16-mixed",
     )
     config.wandb = dict(
-        project="flash-dropout",
+        project="flash-dropout-vit",
         notes=placeholder(str),
         mode="online",
     )
 
     config.model = dict(
-        context_length=128,
-        vocab_size=256,
-        n_layer=4,
-        n_head=16,
+        patch_size=(2, 2),
+        block_size=(8, 8),
         n_embed=1024,
-        batch_first=True,
+        n_head=16,
+        n_layers=2,
         dropout=dict(
             p=0.0,
             variant="vanilla",
@@ -33,24 +32,25 @@ def get_config():
     )
 
     config.optimizer = dict(
-        lr=1e-3,
-        weight_decay=1e-1,
+        lr=1e-4,
     )
 
     config.train = dict(
         max_epochs=200,
-        early_stop_patience=10,
+        eval_every=250,
+        early_stop=dict(
+            monitor="Valiation accuracy",
+            patience=10,
+            mode="max",
+        ),
     )
 
     config.data = dict(
-        length=config.model.get_ref("context_length"),
-        batch_first=config.model.get_ref("batch_first"),
-        vocab_size=config.model.get_ref("vocab_size"),
-        cache_dir=Path("data", "wikitext"),
-        train_batch_size=16,
-        val_batch_size=32,
-        train_size=512,
-        val_size=512,
+        name="mnist",
+        train_batch_size=32,
+        val_batch_size=64,
+        train_size=8192,
+        val_size=4096,
     )
 
     return config

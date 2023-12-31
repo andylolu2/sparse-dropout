@@ -89,10 +89,14 @@ struct KernelTraits {
         std::conditional_t<RowMajorA, GmemCopyThreadLayoutRow, GmemCopyThreadLayoutCol>;
     using GmemCopyThreadLayoutB =
         std::conditional_t<RowMajorB, GmemCopyThreadLayoutRow, GmemCopyThreadLayoutCol>;
+    using GmemCopyThreadLayoutC =
+        std::conditional_t<RowMajorC, GmemCopyThreadLayoutRow, GmemCopyThreadLayoutCol>;
     using GmemCopyValLayoutA =
         std::conditional_t<RowMajorA, GmemCopyValLayoutRow, GmemCopyValLayoutCol>;
     using GmemCopyValLayoutB =
         std::conditional_t<RowMajorB, GmemCopyValLayoutRow, GmemCopyValLayoutCol>;
+    using GmemCopyValLayoutC =
+        std::conditional_t<RowMajorC, GmemCopyValLayoutRow, GmemCopyValLayoutCol>;
     CUTE_STATIC_ASSERT(
         ct::size_v<GmemCopyThreadLayoutA> *ct::size_v<typename GmemCopyAtom::ThrID> == NumThreads);
     CUTE_STATIC_ASSERT(
@@ -121,8 +125,8 @@ struct KernelTraits {
                                                         GmemCopyValLayoutA{}));
     using GmemTiledCopyB = decltype(ct::make_tiled_copy(GmemCopyAtom{}, GmemCopyThreadLayoutB{},
                                                         GmemCopyValLayoutB{}));
-    using GmemTiledCopyC = decltype(ct::make_tiled_copy(GmemCopyAtom{}, GmemCopyThreadLayoutRow{},
-                                                        GmemCopyValLayoutRow{}));
+    using GmemTiledCopyC = decltype(ct::make_tiled_copy(GmemCopyAtom{}, GmemCopyThreadLayoutC{},
+                                                        GmemCopyValLayoutC{}));
 
     using SmemTiledCopyA = decltype(ct::make_tiled_copy_A(SmemCopyAtomA{}, TiledMMA{}));
     using SmemTiledCopyB = decltype(ct::make_tiled_copy_B(SmemCopyAtomB{}, TiledMMA{}));

@@ -11,7 +11,7 @@ def get_config():
     )
 
     config.model = dict(
-        num_layers=4,
+        num_layers=1,
         hidden_dim=2048,
         output_dim=10,
         variant="blockwise[cuda]",
@@ -19,9 +19,13 @@ def get_config():
         block_size=(128, 128),
     )
 
-    config.train = dict(
+    config.optimizer = dict(
         lr=1e-3,
+    )
+
+    config.train = dict(
         max_epochs=200,
+        early_stop_patience=10,
     )
 
     config.data = dict(

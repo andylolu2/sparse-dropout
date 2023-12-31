@@ -14,14 +14,14 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
         block_size: size,
         p: float,
     ):
-        assert block_size == (128, 128), "Only support block size (128, 128)"
         assert 0 <= p < 1, "Dropout probability must be in [0, 1)"
 
-        # BLK_M, BLK_K = block_size
+        BLK_M, BLK_K = block_size
+        BLK_N = 128
         impl = FlashDropoutCUDA(
-            BLK_MNK_GROUP_0=(128, 128, 64, 5),
-            BLK_MNK_GROUP_1=(128, 64, 128, 5),
-            BLK_MNK_GROUP_2=(64, 128, 128, 5),
+            BLK_MNK_GROUP_0=(BLK_M, BLK_N, 64, 5),
+            BLK_MNK_GROUP_1=(BLK_M, 64, BLK_K, 5),
+            BLK_MNK_GROUP_2=(64, BLK_N, BLK_K, 5),
         )
         C, mask, mask_T, mask_table, count = impl.forward(input, weight, p)
 

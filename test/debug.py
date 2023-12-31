@@ -15,7 +15,7 @@ from flash_dropout.functional.naive import (
 L.seed_everything(0)
 torch.set_printoptions(sci_mode=False, edgeitems=5, linewidth=5000)
 
-M, N, K = 1024, 1024, 1024
+M, N, K = 2048, 1024, 1024
 # M, N, K = 128 * 32, 512 * 4, 512
 block_size = (128, 128)
 p = 0.0
@@ -55,6 +55,9 @@ def report(x_ref, x_cuda, name):
     abs_err = torch.abs(x_cuda - x_ref)
     rel_err = torch.abs((x_cuda - x_ref) / x_ref).nan_to_num()
 
+    abs_err_zero_prop = torch.mean((abs_err < 1e-6).float()).item()
+    rel_err_zero_prop = torch.mean((rel_err < 1e-6).float()).item()
+
     max_abs_err_idx = torch.argmax(abs_err)
     max_abs_err_abs = abs_err.flatten()[max_abs_err_idx].item()
     max_abs_err_rel = rel_err.flatten()[max_abs_err_idx].item()
@@ -68,8 +71,8 @@ def report(x_ref, x_cuda, name):
     print(x_ref)
     print("CUDA:")
     print(x_cuda)
-    print(f"{max_abs_err_abs=} {max_abs_err_rel=:.1%}")
-    print(f"{max_rel_err_abs=} {max_rel_err_rel=:.1%}")
+    print(f"{abs_err_zero_prop=:.2%} {max_abs_err_abs=} {max_abs_err_rel=:.1%}")
+    print(f"{rel_err_zero_prop=:.2%} {max_rel_err_abs=} {max_rel_err_rel=:.1%}")
     print()
 
 

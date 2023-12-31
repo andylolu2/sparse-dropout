@@ -16,19 +16,27 @@ class BasicNet(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        assert num_layers >= 1
+        assert num_layers >= 0
 
-        self.layers = nn.ModuleList([nn.Flatten()])
-        dims = [sample[0].numel(), *([hidden_dim] * (num_layers - 1)), output_dim]
-        for i, (in_dim, out_dim) in enumerate(zip(dims[:-2], dims[1:-1])):
-            if i == 0:
-                self.layers.append(nn.Linear(in_dim, out_dim))
-            else:
-                self.layers.append(DropoutMM(in_dim, out_dim, p, variant, **kwargs))
-            self.layers.append(nn.ReLU())
-        self.layers += [nn.Linear(dims[-2], dims[-1])]
+        self.in_proj = nn.Linear(sample[0].numel(), hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, output_dim)
+
+        self.layers = nn.ModuleList(
+            [
+                DropoutMM(hidden_dim, hidden_dim, p, variant, **kwargs)
+                for _ in range(num_layers)
+            ]
+        )
+        self.act = nn.ReLU()
 
     def forward(self, x: torch.Tensor):
+        x = x.view(-1, x.shape[-1])
+        x = self.in_proj(x)
+        x = self.act(x)
+
         for layer in self.layers:
             x = layer(x)
+            x = self.act(x)
+
+        x = self.out_proj(x)
         return x

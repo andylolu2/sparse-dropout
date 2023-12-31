@@ -2,52 +2,60 @@ from pathlib import Path
 
 import lightning as L
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, Subset, random_split
+from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
-from torchvision.datasets import MNIST
+from torchvision.datasets import CIFAR10, MNIST
 
 
-class MNISTDataModule(L.LightningDataModule):
+def load_data_module(name: str, **kwargs):
+    match name:
+        case "mnist":
+            return MNISTDataModule(**kwargs)
+        case "cifar10":
+            return CIFAR10DataModule(**kwargs)
+        case _:
+            raise ValueError(f"Unknown data module: {name}")
+
+
+class VisionDataModule(L.LightningDataModule):
+    num_classes: int
+    img_size: tuple[int, int]
+
     def __init__(
         self,
+        builder,
         train_batch_size: int,
-        train_size: int = 55000,
-        val_size: int = 5000,
+        train_size: int,
+        val_size: int,
         val_batch_size: int | None = None,
     ):
         super().__init__()
+        self.builder = builder
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size or train_batch_size
         self.train_size = train_size
         self.val_size = val_size
-        self.data_dir = str(Path.home() / ".cache" / "torchvision" / "mnist")
-        self.transform = transforms.ToTensor()
+        self.transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Resize(self.img_size, antialias=True),
+            ]
+        )
 
     @property
     def train_samlpe(self):
-        return self.mnist_train[0]
+        return next(iter(self.train_dataloader()))
 
     def prepare_data(self):
-        MNIST(self.data_dir, train=True, download=True)
-        MNIST(self.data_dir, train=False, download=True)
+        self.full_dataset = self.builder(self.transform)
 
     def setup(self, stage: str):
         if stage == "fit":
-            mnist_full = MNIST(self.data_dir, train=True, transform=self.transform)
             indices = np.random.choice(
-                len(mnist_full), self.train_size + self.val_size, replace=False
+                len(self.full_dataset), self.train_size + self.val_size, replace=False
             ).tolist()
-            self.mnist_train = Subset(mnist_full, indices[: self.train_size])
-            self.mnist_val = Subset(mnist_full, indices[self.train_size :])
-        elif stage == "test":
-            self.mnist_test = MNIST(
-                self.data_dir, train=False, transform=self.transform
-            )
-        elif stage == "predict":
-            self.mnist_predict = MNIST(
-                self.data_dir, train=False, transform=self.transform
-            )
+            self.mnist_train = Subset(self.full_dataset, indices[: self.train_size])
+            self.mnist_val = Subset(self.full_dataset, indices[self.train_size :])
         else:
             raise ValueError(f"Unknown stage: {stage}")
 
@@ -59,8 +67,52 @@ class MNISTDataModule(L.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.mnist_val, batch_size=self.val_batch_size)
 
-    def test_dataloader(self):
-        return DataLoader(self.mnist_test, batch_size=self.val_batch_size)
 
-    def predict_dataloader(self):
-        return DataLoader(self.mnist_predict, batch_size=self.val_batch_size)
+class MNISTDataModule(VisionDataModule):
+    num_classes = 10
+    img_size = (32, 32)
+
+    def __init__(
+        self,
+        train_batch_size: int,
+        train_size: int,
+        val_size: int,
+        val_batch_size: int | None = None,
+    ):
+        super().__init__(
+            lambda transform: MNIST(
+                str(Path("data", "MNIST")),
+                train=True,
+                download=True,
+                transform=transform,
+            ),
+            train_batch_size,
+            train_size,
+            val_size,
+            val_batch_size,
+        )
+
+
+class CIFAR10DataModule(VisionDataModule):
+    num_classes = 10
+    img_size = (32, 32)
+
+    def __init__(
+        self,
+        train_batch_size: int,
+        train_size: int,
+        val_size: int,
+        val_batch_size: int | None = None,
+    ):
+        super().__init__(
+            lambda transform: CIFAR10(
+                str(Path("data", "MNIST")),
+                train=True,
+                download=True,
+                transform=transform,
+            ),
+            train_batch_size,
+            train_size,
+            val_size,
+            val_batch_size,
+        )

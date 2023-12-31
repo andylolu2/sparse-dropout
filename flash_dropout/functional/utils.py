@@ -16,8 +16,8 @@ def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float):
 
     Returns a mask tensor on the *CPU*.
     """
-    *b, m, n = x.shape
-    mask_shape = (ceil(m / block_size[0]), ceil(n / block_size[1]))
+    *b, m, k = x.shape
+    mask_shape = (ceil(m / block_size[0]), ceil(k / block_size[1]))
     mask = torch.rand(*b, *mask_shape, device=x.device) < p
     return mask
 

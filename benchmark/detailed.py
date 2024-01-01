@@ -139,7 +139,7 @@ if __name__ == "__main__":
     # M, N, K = b * s, d * 4, d
     # M, N, K = b * s, d, d * 4
     # M, N, K = b * s, d, 3 * d
-    M, N, K = 8192, 4 * 1024, 1024
+    M, N, K = 256, 1024, 1024
 
     A = torch.randn((M, K), device="cuda", dtype=torch.float16)
     B = torch.randn((N, K), device="cuda", dtype=torch.float16)

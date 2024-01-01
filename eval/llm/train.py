@@ -49,9 +49,9 @@ def main(_):
         model.train()
         for x in train_loader:
             optimizer.zero_grad(set_to_none=True)
-            with CudaTimer("forward") as fwd_timer:
+            with CudaTimer() as fwd_timer:
                 logits, loss = model(x)
-            with CudaTimer("backward") as bwd_timer:
+            with CudaTimer() as bwd_timer:
                 fabric.backward(loss)
             optimizer.step()
 

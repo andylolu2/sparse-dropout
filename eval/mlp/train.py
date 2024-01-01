@@ -51,11 +51,11 @@ def main(_):
         model.train()
         for x, label in train_loader:
             optimizer.zero_grad()
-            with CudaTimer("forward") as fwd_timer:
+            with CudaTimer() as fwd_timer:
                 preds = model(x)
                 losses = F.cross_entropy(preds, label, reduction="none")
                 loss = losses.mean()
-            with CudaTimer("backward") as bwd_timer:
+            with CudaTimer() as bwd_timer:
                 fabric.backward(loss)
             optimizer.step()
 

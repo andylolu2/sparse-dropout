@@ -11,16 +11,22 @@ def blockwise_dropout(
     input: torch.Tensor, mask: torch.Tensor, block_size: size, p: float
 ):
     assert 0 <= p < 1, "Dropout probability must be in [0, 1)"
+    M, K = input.shape
+    BLK_M, BLK_K = block_size
 
-    mask = torch.repeat_interleave(mask, block_size[0], dim=0)
-    mask = torch.repeat_interleave(mask, block_size[1], dim=1)
-    mask = mask[: input.shape[0], : input.shape[1]]
+    input_blocks = input.view(M // BLK_M, BLK_M, K // BLK_K, BLK_K).transpose(1, 2)
+    input_blocks[mask] = 0
+    input_blocks[~mask] /= 1 - p
 
-    x = input.clone()
-    x[mask] = 0
-    x[~mask] /= 1 - p
+    # mask = torch.repeat_interleave(mask, block_size[0], dim=0)
+    # mask = torch.repeat_interleave(mask, block_size[1], dim=1)
+    # mask = mask[: input.shape[0], : input.shape[1]]
 
-    return x
+    # x = input.clone()
+    # x[mask] = 0
+    # x[~mask] /= 1 - p
+
+    return input
 
 
 def structured_blockwise_dropout_matmul(

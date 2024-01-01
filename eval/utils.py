@@ -29,8 +29,7 @@ global_metrics = Metrics()
 
 
 class CudaTimer:
-    def __init__(self, name: str):
-        self.name = name
+    def __init__(self):
         self.start = torch.cuda.Event(enable_timing=True)
         self.end = torch.cuda.Event(enable_timing=True)
 

@@ -49,10 +49,10 @@ def main(_):
     for epoch in range(config.train.max_epochs):
         for x, label in train_loader:
             optimizer.zero_grad(set_to_none=True)
-            with CudaTimer("forward") as fwd_timer:
+            with CudaTimer() as fwd_timer:
                 preds = model(x)
             loss = F.cross_entropy(preds, label)
-            with CudaTimer("backward") as bwd_timer:
+            with CudaTimer() as bwd_timer:
                 fabric.backward(loss)
             optimizer.step()
 

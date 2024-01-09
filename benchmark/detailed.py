@@ -1,76 +1,88 @@
 import math
+import time
 
 import lightning as L
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
 import torch.types
 
+import flash_dropout.functional as F
 from flash_dropout.cuda.binding import FlashDropoutCUDA
-from flash_dropout.functional.blockwise_dropout_matmul_triton import (
-    blockwise_dropout_matmul,
-    blockwise_dsd_matmul,
-    blockwise_sdd_matmul,
-)
-from flash_dropout.functional.naive import blockwise_dropout
-from flash_dropout.functional.naive import (
-    blockwise_dropout_matmul as naive_blockwise_dropout_matmul,
-)
-from flash_dropout.functional.utils import (
-    blockwise_dropout_mask,
-    mask_to_increment_table,
-)
+
+# from flash_dropout.functional.blockwise_dropout_matmul_cuda import (
+#     blockwise_dropout_matmul as cuda_blockwise_dropout_matmul,
+# )
+# from flash_dropout.functional.naive import blockwise_dropout
+# from flash_dropout.functional.naive import (
+#     blockwise_dropout_matmul as naive_blockwise_dropout_matmul,
+# )
+# from flash_dropout.functional.utils import (
+#     blockwise_dropout_mask,
+#     mask_to_increment_table,
+# )
 
 block_size = (128, 128)
 
 
 def f_naive(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
-    mask = blockwise_dropout_mask(A, block_size, p)
-    A = blockwise_dropout(A, mask, block_size, p)
-    C = A @ B.T
-    yield C
-
-    dA = blockwise_dropout(dC @ B.T, mask, block_size, p)
-    yield dA
-
-    dB = dC.T @ A
-    yield dB
-
-
-def f_dense(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
-    yield A @ B.T
-    yield dC @ B
-    yield dC.T @ A
-
-
-def f_baseline(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
-    A_ = A.clone().requires_grad_(True)
-    B_ = B.clone().requires_grad_(True)
-
-    A__ = torch.dropout(A_, p, train=True)
-    C = A__ @ B_.T
+    C = F.naive_blockwise_dropout_matmul(A, B, block_size, p)
     yield C
 
     C.backward(dC)
-    yield A_.grad
-    yield B_.grad
+    yield A.grad, B.grad
+
+
+def f_dense(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor):
+    C = torch.nn.functional.linear(A, B)
+    yield C
+
+    C.backward(dC)
+    yield A.grad, B.grad
+
+
+def f_baseline(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
+    C = F.vanilla_dropout_matmul(A, B, p)
+    yield C
+
+    C.backward(dC)
+    yield A.grad, B.grad
 
 
 def f_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
+    # C = F.cuda_blockwise_dropout_matmul(A, B, block_size, p)
+    # yield C
+
+    # C.backward(dC)
+    # yield A.grad, B.grad
     impl = FlashDropoutCUDA(
         BLK_MNK_GROUP_0=(128, 128, 64, 5),
         BLK_MNK_GROUP_1=(128, 64, 128, 5),
         BLK_MNK_GROUP_2=(64, 128, 128, 5),
+        # BLK_MNK_GROUP_0=(64, 64, 64, 5),
+        # BLK_MNK_GROUP_1=(64, 64, 64, 5),
+        # BLK_MNK_GROUP_2=(64, 64, 64, 5),
     )
 
     C, mask, mask_T, mask_table, count = impl.forward(A, B, p)
     yield C
-    yield impl.backward_dA(dC, B, mask_table, p, count)
-    yield impl.backward_dB(dC, A, mask_T, p)
+
+    dA = impl.backward_dA(dC, B, mask_table, p, count)
+    dB = impl.backward_dB(dC, A, mask_T, p)
+    yield dA, dB
 
 
-def do_bench_detailed(fn, warmup=100, rep=500):
+def f_triton(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
+    C = F.triton_blockwise_dropout_matmul(A, B, block_size, p)
+    yield C
+
+    C.backward(dC)
+    yield A.grad, B.grad
+
+
+def do_bench_detailed(fn, warmup=0.5, rep=0.2):
     n_breakpoints = 0
     for _ in fn():
         n_breakpoints += 1
@@ -78,43 +90,31 @@ def do_bench_detailed(fn, warmup=100, rep=500):
 
     cache = torch.empty(int(4e6 // 8), dtype=torch.int64, device="cuda")
 
-    # Estimate the runtime of the function
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    start_event.record()
-    for _ in range(10):
+    events = []
+
+    start_time = time.time()
+    while time.time() - start_time < warmup:
         cache.zero_()
         for _ in fn():
             pass
-    end_event.record()
-    torch.cuda.synchronize()
-    estimate_ms = start_event.elapsed_time(end_event) / 10
+        torch.cuda.synchronize()
 
-    # compute number of warmup and repeat
-    n_warmup = math.ceil(warmup / estimate_ms)
-    n_repeat = math.ceil(rep / estimate_ms)
-
-    events = [
-        [
+    # Benchmark
+    start_time = time.time()
+    while time.time() - start_time < rep:
+        breakpoint_events = [
             (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
             for _ in range(n_breakpoints)
         ]
-        for _ in range(n_repeat)
-    ]
+        events.append(breakpoint_events)
 
-    for _ in range(n_warmup):
-        for _ in fn():
-            pass
-
-    # Benchmark
-    for breakpoint_events in events:
         cache.zero_()
-
         f = iter(fn())
         for start, end in breakpoint_events:
             start.record()
             next(f)
             end.record()
+        torch.cuda.synchronize()
 
     # Record clocks
     torch.cuda.synchronize()
@@ -133,39 +133,145 @@ if __name__ == "__main__":
 
     L.seed_everything(0)
 
-    b = 4
-    s = 256
-    d = 512
+    # b = 4
+    # s = 256
+    # d = 512
     # M, N, K = b * s, d * 4, d
     # M, N, K = b * s, d, d * 4
     # M, N, K = b * s, d, 3 * d
-    M, N, K = 256, 1024, 1024
+    M, N, K = 1024, 1024, 1024
 
-    A = torch.randn((M, K), device="cuda", dtype=torch.float16)
-    B = torch.randn((N, K), device="cuda", dtype=torch.float16)
+    A = torch.randn((M, K), device="cuda", dtype=torch.float16, requires_grad=True)
+    B = torch.randn((N, K), device="cuda", dtype=torch.float16, requires_grad=True)
     dC = torch.randn((M, N), device="cuda", dtype=torch.float16)
 
-    fs = {
-        "dense": lambda: f_dense(A, B, dC, 0.5),
-        "baseline": lambda: f_baseline(A, B, dC, 0.5),
-        "p=0.0": lambda: f_cuda(A, B, dC, 0.0),
-        "p=0.25": lambda: f_cuda(A, B, dC, 0.25),
-        "p=0.5": lambda: f_cuda(A, B, dC, 0.5),
-        "p=0.75": lambda: f_cuda(A, B, dC, 0.75),
-        "p=0.95": lambda: f_cuda(A, B, dC, 0.95),
+    breakpoint_names = ["forward", "backward"]
+
+    dense_fs = {
+        "Dense": lambda: f_dense(A, B, dC),
+        "Dropout + Dense": lambda: f_baseline(A, B, dC, 0.5),
+        "Block dropout + Dense": lambda: f_naive(A, B, dC, 0.5),
     }
 
+    sparse_fs = {
+        "SparseDrop": lambda p: f_cuda(A, B, dC, p),
+        # "SparseDrop Triton": lambda p: f_triton(A, B, dC, p),
+    }
+
+    dense_data = {}
+    for name, fn in dense_fs.items():
+        timings = do_bench_detailed(fn, warmup=1, rep=1)
+        dense_data[name] = {}
+        for breakpoint_name, timing in zip(breakpoint_names, timings):
+            avg = timing.mean().item()
+            std_err = timing.std().item() / math.sqrt(timing.shape[0])
+            dense_data[name][breakpoint_name] = {
+                "avg": avg,
+                "std": std_err,
+                "flops": 2 * M * N * K / (avg / 1000),
+            }
+        full_timings = timings.sum(dim=0)
+        avg = full_timings.mean().item()
+        std_err = full_timings.std().item() / math.sqrt(full_timings.shape[0])
+        dense_data[name]["full"] = {
+            "avg": avg,
+            "std": std_err,
+            "flops": 6 * M * N * K / (avg / 1000),
+        }
+
     data = []
-
-    for name, fn in fs.items():
-        timings = do_bench_detailed(fn)
-        for i, timing in enumerate(timings):
-            for t in timing:
-                data.append({"name": name, "breakpoint": i, "time": t.item()})
-
+    for name, fn in sparse_fs.items():
+        for p in np.arange(0.0, 1.0, 0.05):
+            timings = do_bench_detailed(lambda: fn(p))
+            for breakpoint_name, timing in zip(breakpoint_names, timings):
+                for t in timing:
+                    data.append(
+                        {
+                            "name": name,
+                            "breakpoint": breakpoint_name,
+                            "time": t.item(),
+                            "sparsity": p,
+                            "flops": 2 * M * N * K * (1 - p) / (t.item() / 1000),
+                        }
+                    )
+            full_timings = timings.sum(dim=0)
+            for t in full_timings:
+                data.append(
+                    {
+                        "name": name,
+                        "breakpoint": "full",
+                        "time": t.item(),
+                        "sparsity": p,
+                        "flops": 6 * M * N * K * (1 - p) / (t.item() / 1000),
+                    }
+                )
     df = pd.DataFrame(data)
+    df.rename(columns={"name": "Method"}, inplace=True)
 
-    sns.barplot(df, x="breakpoint", y="time", hue="name", errorbar="sd")
-    plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
-    plt.tight_layout()
-    plt.savefig(f"./logs/matmul-detailed_m{M}n{N}k{K}.png", dpi=300)
+    for breakpoint_name in df["breakpoint"].unique():
+        fig, ax = plt.subplots(figsize=(5, 4))
+
+        sub_df = df[df["breakpoint"] == breakpoint_name]
+        for i, (name, item) in enumerate(dense_data.items()):
+            avg = item[breakpoint_name]["avg"]
+            ax.axhline(avg, label=name, linestyle="--", color=f"C{i+1}")
+            # lower = avg - 1.96 * item[breakpoint_name]["std"]
+            # upper = avg + 1.96 * item[breakpoint_name]["std"]
+            # ax.fill_between(
+            #     [0, 1],
+            #     [lower, lower],
+            #     [upper, upper],
+            #     color=f"C{i+1}",
+            #     alpha=0.2,
+            # )
+
+        sns.lineplot(
+            data=sub_df,
+            x="sparsity",
+            y="time",
+            hue="Method",
+            marker="o",
+            markersize=4,
+            errorbar=None,
+            ax=ax,
+        )
+        ax.set(
+            xlim=(-0.02, 1.02),
+            ylabel="Time (ms)",
+            xlabel="Sparsity",
+        )
+        fig.tight_layout()
+        fig.savefig(
+            f"./logs/matmul-detailed_m{M}n{N}k{K}_{breakpoint_name}.png", dpi=300
+        )
+
+        fig, ax = plt.subplots(figsize=(5, 4))
+
+        x_intercept = dense_data["Dense"][breakpoint_name]["flops"]
+        ax.plot(
+            [0, 1],
+            [x_intercept, 0],
+            linestyle="--",
+            color="C1",
+            label="FLOPS for speed-up",
+        )
+
+        sns.lineplot(
+            data=sub_df,
+            x="sparsity",
+            y="flops",
+            hue="Method",
+            marker="o",
+            markersize=4,
+            errorbar=None,
+            ax=ax,
+        )
+        ax.set(
+            xlim=(-0.02, 1.02),
+            ylabel="FLOPS",
+            xlabel="Sparsity",
+        )
+        fig.tight_layout()
+        fig.savefig(
+            f"./logs/matmul-detailed_m{M}n{N}k{K}_{breakpoint_name}_flops.png", dpi=300
+        )

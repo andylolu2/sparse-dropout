@@ -7,9 +7,9 @@ from ml_collections import config_flags
 from torch.optim import Adam
 
 import wandb
-from eval.mlp.dataset import MNISTDataModule
+from eval.mlp.dataset import load_data_module
 from eval.mlp.model import BasicNet
-from eval.utils import CudaTimer, Metrics
+from eval.utils import CudaTimer, global_metrics
 
 _CONFIG = config_flags.DEFINE_config_file("config", short_name="c")
 
@@ -26,7 +26,7 @@ def main(_):
     fabric.launch()
 
     # Instantiate objects
-    dm = MNISTDataModule(**config.data)
+    dm = load_data_module(**config.data)
     dm.prepare_data()
     dm.setup("fit")
 
@@ -41,59 +41,73 @@ def main(_):
     optimizer = fabric.setup_optimizers(optimizer)
 
     # Train
-    metrics = Metrics()
-    stopper = EarlyStopping(
-        monitor="val_loss", patience=config.train.early_stop_patience
-    )
+    stopper = EarlyStopping(**config.train.early_stop)
 
     step = 0
     for epoch in range(config.train.max_epochs):
-        model.train()
         for x, label in train_loader:
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             with CudaTimer() as fwd_timer:
                 preds = model(x)
-                losses = F.cross_entropy(preds, label, reduction="none")
-                loss = losses.mean()
+            loss = F.cross_entropy(preds, label)
             with CudaTimer() as bwd_timer:
                 fabric.backward(loss)
             optimizer.step()
 
-            metrics.log(
-                loss=losses.detach(),
+            with torch.no_grad():
+                correct = torch.argmax(preds, -1) == label
+
+            global_metrics.log(
+                loss=loss.detach(),
+                correct=correct.detach(),
                 fwd_time=fwd_timer.elapsed(),
                 bwd_time=bwd_timer.elapsed(),
             )
             step += 1
 
-        model.eval()
-        with torch.no_grad():
-            for x, label in val_loader:
-                preds = model(x)
-                losses = F.cross_entropy(preds, label, reduction="none")
-                metrics.log(val_loss=losses)
+            if step % config.train.log_every == 0:
+                train_loss, train_acc, fwd_time, bwd_time = global_metrics.collect(
+                    "loss", "correct", "fwd_time", "bwd_time"
+                )
+                global_metrics.clear()
+                wandb.log(
+                    {
+                        "train/loss": torch.tensor(train_loss).mean().item(),
+                        "train/acc": torch.concat(train_acc).float().mean().item(),
+                        "fwd_time": torch.tensor(fwd_time).mean(),
+                        "bwd_time": torch.tensor(bwd_time).mean(),
+                        "step": step,
+                        "epoch": epoch,
+                    },
+                )
 
-        logs = metrics.asdict()
-        metrics.clear()
-        train_loss = torch.concatenate(logs["loss"]).mean()
-        val_loss = torch.concatenate(logs["val_loss"]).mean()
-        fwd_time = torch.tensor(logs["fwd_time"]).mean()
-        bwd_time = torch.tensor(logs["bwd_time"]).mean()
-        wandb.log(
-            {
-                "train/loss": train_loss.item(),
-                "val/loss": val_loss.item(),
-                "fwd_time": fwd_time.item(),
-                "bwd_time": bwd_time.item(),
-                "step": step,
-                "epoch": epoch,
-            },
-        )
+            if step % config.train.eval_every == 0:
+                model.eval()
+                with torch.no_grad():
+                    for x, label in val_loader:
+                        preds = model(x)
+                        correct = torch.argmax(preds, -1) == label
+                        loss = F.cross_entropy(preds, label)
+                        global_metrics.log(val_loss=loss, val_correct=correct)
+                model.train()
 
-        should_stop, reason = stopper._evaluate_stopping_criteria(val_loss)
-        if should_stop:
-            print(f"Early stopping: {reason}")
-            break
+                val_loss, val_acc = global_metrics.collect("val_loss", "val_correct")
+                val_loss = torch.tensor(val_loss).mean()
+                val_acc = torch.concat(val_acc).float().mean()
+                wandb.log(
+                    {
+                        "val/loss": val_loss.item(),
+                        "val/acc": val_acc.item(),
+                        "step": step,
+                        "epoch": epoch,
+                    },
+                )
+
+                should_stop, reason = stopper._evaluate_stopping_criteria(val_acc)
+                if should_stop:
+                    print(f"Early stopping: {reason}")
+                    dm.teardown("fit")
+                    exit()
 
     dm.teardown("fit")
 

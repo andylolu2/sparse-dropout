@@ -1,4 +1,5 @@
 from ml_collections import ConfigDict
+from ml_collections.config_dict import placeholder
 
 
 def get_config():
@@ -9,14 +10,21 @@ def get_config():
         accelerator="auto",
         precision="16-mixed",
     )
+    config.wandb = dict(
+        project="flash-dropout-mlp",
+        notes=placeholder(str),
+        mode="online",
+    )
 
     config.model = dict(
-        num_layers=1,
-        hidden_dim=2048,
+        num_layers=2,
+        hidden_dim=1024,
         output_dim=10,
-        variant="blockwise[cuda]",
-        p=0.0,
-        block_size=(128, 128),
+        dropout=dict(
+            variant="blockwise[cuda]",
+            p=0.0,
+            block_size=(128, 128),
+        ),
     )
 
     config.optimizer = dict(
@@ -24,15 +32,22 @@ def get_config():
     )
 
     config.train = dict(
-        max_epochs=200,
-        early_stop_patience=10,
+        max_epochs=100,
+        eval_every=50,
+        log_every=10,
+        early_stop=dict(
+            monitor="Valiation accuracy",
+            patience=5,
+            mode="max",
+        ),
     )
 
     config.data = dict(
-        train_batch_size=512,
-        val_batch_size=512,
-        train_size=4096,
-        val_size=8192,
+        name="mnist",
+        train_batch_size=1024,
+        val_batch_size=1024,
+        train_size=16384,
+        val_size=4096,
     )
 
     return config

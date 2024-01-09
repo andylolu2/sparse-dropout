@@ -44,3 +44,7 @@ class CudaTimer:
     def elapsed(self):
         torch.cuda.synchronize()
         return self.start.elapsed_time(self.end)
+
+
+def next_multiple(x: int, base: int) -> int:
+    return (x + base - 1) // base * base

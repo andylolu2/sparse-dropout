@@ -14,17 +14,10 @@ def blockwise_dropout(
     M, K = input.shape
     BLK_M, BLK_K = block_size
 
+    input = input.clone()  # Need to clone to avoid in-place operation
     input_blocks = input.view(M // BLK_M, BLK_M, K // BLK_K, BLK_K).transpose(1, 2)
     input_blocks[mask] = 0
     input_blocks[~mask] /= 1 - p
-
-    # mask = torch.repeat_interleave(mask, block_size[0], dim=0)
-    # mask = torch.repeat_interleave(mask, block_size[1], dim=1)
-    # mask = mask[: input.shape[0], : input.shape[1]]
-
-    # x = input.clone()
-    # x[mask] = 0
-    # x[~mask] /= 1 - p
 
     return input
 

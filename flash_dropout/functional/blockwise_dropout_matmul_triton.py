@@ -19,7 +19,7 @@ from flash_dropout.types import size
         num_warps=[1, 2],
         num_stages=[1],
         BLOCK_N=[32, 64, 128],
-        GROUP_M=[8],
+        GROUP_M=[5],
     ),
     key=["M", "N", "K", "BLOCK_M", "BLOCK_K"],
 )
@@ -94,7 +94,7 @@ def blockwise_dsd_matmul_kernel(
         acc += tl.dot(a, b, out_dtype=acc.dtype)
 
         table_ptr += 1 * stride_t
-    acc *= scale
+    # acc *= scale
     c = acc.to(c_ptr.dtype.element_ty)
 
     # Store output
@@ -114,7 +114,7 @@ def blockwise_dsd_matmul_kernel(
         num_warps=[1, 2],
         num_stages=[1],
         BLOCK_N=[32, 64, 128],
-        GROUP_M=[8],
+        GROUP_M=[5],
     ),
     key=["M", "N", "K", "BLOCK_M", "BLOCK_K"],
 )
@@ -184,7 +184,7 @@ def blockwise_dsd_mask_matmul_kernel(
         a_block_ptr = tl.advance(a_block_ptr, (0, BLOCK_K))
         b_block_ptr = tl.advance(b_block_ptr, (BLOCK_K, 0))
 
-    acc *= scale
+    # acc *= scale
     c = acc.to(c_ptr.dtype.element_ty)
 
     # Store output
@@ -299,7 +299,7 @@ def blockwise_sdd_matmul_kernel(
     # Other parameters
     M, N, K,
     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
-    scale,
+    scale: tl.constexpr,
     # Meta-parameters
     BLOCK_K: tl.constexpr, EVEN_K: tl.constexpr,
     # fmt: on
@@ -341,7 +341,7 @@ def blockwise_sdd_matmul_kernel(
 
         a_block_ptr = tl.advance(a_block_ptr, (0, BLOCK_K))
         b_block_ptr = tl.advance(b_block_ptr, (BLOCK_K, 0))
-    acc *= scale
+    # acc *= scale
     c = acc.to(c_ptr.dtype.element_ty)
 
     # Store output

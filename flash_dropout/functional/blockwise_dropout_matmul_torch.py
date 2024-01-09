@@ -10,6 +10,7 @@ from .utils import blockwise_dropout_mask
 def blockwise_dropout_matmul(
     input: torch.Tensor, weight: torch.Tensor, block_size: size, p: float
 ):
+    """Experimental: This does not support backward pass."""
     M, K = input.shape
     BLK_M, BLK_K = block_size
 

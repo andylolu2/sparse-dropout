@@ -12,9 +12,8 @@ def main(_):
     import miscellaneous.plot_style
 
     wandb.login()
-    # run_ids = list(range(7, 25)) + list(range(31, 49))
-    run_ids = list(range(68, 84))
-    runs = load_runs("andylolu2", "flash-dropout-mlp", run_ids)
+    run_ids = list(range(47, 58))
+    runs = load_runs("andylolu2", "flash-dropout-vit", run_ids)
 
     metrics = {
         "train/acc": ("Train accuracy", "max"),
@@ -91,7 +90,7 @@ def main(_):
         fig.tight_layout()
 
         name = "|".join([m.replace("/", "-") for m in ms])
-        fig.savefig(f"./logs/mlp-fashion-{name}.png", dpi=300)
+        fig.savefig(f"./logs/vit-fashion-{name}.png", dpi=300)
 
 
 if __name__ == "__main__":

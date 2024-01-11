@@ -12,18 +12,6 @@ import torch.types
 import flash_dropout.functional as F
 from flash_dropout.cuda.binding import FlashDropoutCUDA
 
-# from flash_dropout.functional.blockwise_dropout_matmul_cuda import (
-#     blockwise_dropout_matmul as cuda_blockwise_dropout_matmul,
-# )
-# from flash_dropout.functional.naive import blockwise_dropout
-# from flash_dropout.functional.naive import (
-#     blockwise_dropout_matmul as naive_blockwise_dropout_matmul,
-# )
-# from flash_dropout.functional.utils import (
-#     blockwise_dropout_mask,
-#     mask_to_increment_table,
-# )
-
 block_size = (128, 128)
 
 
@@ -52,11 +40,6 @@ def f_baseline(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
 
 
 def f_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
-    # C = F.cuda_blockwise_dropout_matmul(A, B, block_size, p)
-    # yield C
-
-    # C.backward(dC)
-    # yield A.grad, B.grad
     impl = FlashDropoutCUDA(
         BLK_MNK_GROUP_0=(128, 128, 64, 5),
         BLK_MNK_GROUP_1=(128, 64, 128, 5),

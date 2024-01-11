@@ -1,6 +1,8 @@
 from collections import defaultdict, deque
 
 import torch
+import wandb
+from wandb.apis.public import Run
 
 
 class Metrics:
@@ -48,3 +50,18 @@ class CudaTimer:
 
 def next_multiple(x: int, base: int) -> int:
     return (x + base - 1) // base * base
+
+
+def load_runs(entity: str, project: str, run_ids: list[int]) -> list[Run]:
+    api = wandb.Api()
+
+    runs = api.runs(
+        path=f"{entity}/{project}",
+        filters={
+            "display_name": {
+                "$regex": rf"^[a-zA-Z]+-[a-zA-Z]+-({'|'.join(map(str, run_ids))})$"
+            }
+        },
+    )
+
+    return runs

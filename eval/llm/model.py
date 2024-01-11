@@ -89,7 +89,7 @@ class GPT(nn.Module):
         n_head: int,
         n_embed: int,
         dropout: dict,
-        batch_first: bool,
+        batch_first: bool = True,
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -186,7 +186,7 @@ class GPT(nn.Module):
         flops_per_token = 6 * N + 12 * L * H * Q * T
         flops_per_fwdbwd = flops_per_token * T
         flops_achieved = batch_size * flops_per_fwdbwd * (1.0 / dt)  # per second
-        flops_promised = 40e12  # RTX2060 GPU bfloat16 peak flops is 50 TFLOPS
+        flops_promised = 20e12  # RTX2060 GPU peak flops is about 20 TFLOPS
         mfu = flops_achieved / flops_promised
         return mfu
 

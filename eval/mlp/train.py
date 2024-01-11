@@ -1,12 +1,12 @@
 import lightning as L
 import torch
 import torch.nn.functional as F
+import wandb
 from absl import app
 from lightning.pytorch.callbacks import EarlyStopping
 from ml_collections import config_flags
 from torch.optim import Adam
 
-import wandb
 from eval.mlp.dataset import load_data_module
 from eval.mlp.model import BasicNet
 from eval.utils import CudaTimer, global_metrics
@@ -60,22 +60,25 @@ def main(_):
             global_metrics.log(
                 loss=loss.detach(),
                 correct=correct.detach(),
-                fwd_time=fwd_timer.elapsed(),
-                bwd_time=bwd_timer.elapsed(),
+                fwd_timer=fwd_timer,
+                bwd_timer=bwd_timer,
             )
             step += 1
 
             if step % config.train.log_every == 0:
-                train_loss, train_acc, fwd_time, bwd_time = global_metrics.collect(
-                    "loss", "correct", "fwd_time", "bwd_time"
+                train_loss, train_acc, fwd_timer, bwd_timer = global_metrics.collect(
+                    "loss", "correct", "fwd_timer", "bwd_timer"
                 )
                 global_metrics.clear()
+
+                fwd_time = [timer.elapsed() for timer in fwd_timer]
+                bwd_time = [timer.elapsed() for timer in bwd_timer]
                 wandb.log(
                     {
                         "train/loss": torch.tensor(train_loss).mean().item(),
                         "train/acc": torch.concat(train_acc).float().mean().item(),
-                        "fwd_time": torch.tensor(fwd_time).mean(),
-                        "bwd_time": torch.tensor(bwd_time).mean(),
+                        "fwd_time": torch.tensor(fwd_time).mean().item(),
+                        "bwd_time": torch.tensor(bwd_time).mean().item(),
                         "step": step,
                         "epoch": epoch,
                     },

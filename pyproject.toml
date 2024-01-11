@@ -29,6 +29,7 @@ pytest = "^7.4.3"
 
 [tool.isort]
 profile = "black"
+known_third_party = ["wandb"]
 
 [build-system]
 requires = ["poetry-core"]

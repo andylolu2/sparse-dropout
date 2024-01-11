@@ -12,14 +12,11 @@ def main(_):
     import miscellaneous.plot_style
 
     wandb.login()
-    # run_ids = list(range(7, 25)) + list(range(31, 49))
-    run_ids = list(range(68, 84))
-    runs = load_runs("andylolu2", "flash-dropout-mlp", run_ids)
+    run_ids = list(range(6, 20))
+    runs = load_runs("andylolu2", "flash-dropout-llm", run_ids)
 
     metrics = {
-        "train/acc": ("Train accuracy", "max"),
         "train/loss": ("Train loss", "min"),
-        "val/acc": ("Accuracy", "max"),
         "val/loss": ("Loss", "min"),
     }
 
@@ -51,18 +48,13 @@ def main(_):
         print("\n", f"--- {name} ---")
         print(group.sort_values("mean"))
 
-    for ms in [
-        ["train/acc", "val/acc"],
-        ["train/loss", "val/loss"],
-    ]:
+    for ms in [["train/loss", "val/loss"]]:
         fig, ax = plt.subplots(figsize=(5, 4))
         sub_df = df[df["metric"].isin(ms)]
         sub_df = sub_df.rename(columns={"metric": "Metric"})
         sub_df["Metric"] = sub_df["Metric"].replace(
             {
-                "train/acc": "Train accuracy",
                 "train/loss": "Train loss",
-                "val/acc": "Val accuracy",
                 "val/loss": "Val loss",
             }
         )
@@ -91,7 +83,7 @@ def main(_):
         fig.tight_layout()
 
         name = "|".join([m.replace("/", "-") for m in ms])
-        fig.savefig(f"./logs/mlp-fashion-{name}.png", dpi=300)
+        fig.savefig(f"./logs/llm-shakespeare-{name}.png", dpi=300)
 
 
 if __name__ == "__main__":

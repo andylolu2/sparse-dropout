@@ -1,4 +1,4 @@
-# SparseDrop (FlashDropout)
+# SparseDrop
 
 SparseDrop is a simple, structured, and hardware-friendly variant of dropout that can benefit from sparsity on GPUs. 
 

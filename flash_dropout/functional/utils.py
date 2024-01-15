@@ -75,54 +75,6 @@ def mask_to_increment_table(
     return table, row_indices, row_widths
 
 
-def structured_dropout_mask(
-    x: torch.Tensor, block_size: size, p: float
-) -> torch.Tensor:
-    """Creates a blockwise dropout mask for a matrix.
-
-    mask[i, j] = True means block (i, j) is dropped.
-    That is, x[i BLK_N : (i + 1) BLK_N, j BLK_K : (j + 1) BLK_K] is dropped if
-    equal to True.
-    """
-    assert x.ndim == 2
-
-    num_blocks = (ceil(x.shape[0] / block_size[0]), ceil(x.shape[1] / block_size[1]))
-    num_blocks_not_masked = round(num_blocks[1] * (1 - p))
-
-    not_masked_indices = torch.argsort(torch.rand(*num_blocks), dim=1)
-    not_masked_indices, _ = torch.sort(
-        not_masked_indices[:, :num_blocks_not_masked], dim=1
-    )
-
-    return not_masked_indices
-
-
-def structured_mask_to_increment_table(mask: torch.Tensor, BLOCK_K: int):
-    """Converts a mask to an pointer increment table.
-
-    Args:
-        mask: A mask of shape (N // BLK_N, K // BLK_K) where True means dropped.
-        BLK_K: The block size.
-
-    Example:
-        BLK_K = 16
-        mask = [
-            [0, 1, 2],
-            [0, 1, 3],
-            [0, 2, 3],
-            [1, 2, 3],
-        ]
-
-        table = [
-            [0,  16, 16],
-            [0,  16, 32],
-            [0,  32, 16],
-            [16, 16, 16],
-        ]
-    """
-    return torch.diff(mask, prepend=torch.tensor([[0]], device=mask.device)) * BLOCK_K
-
-
 @triton.jit
 def threadblock_swizzle(
     pid: tl.tensor, grid_m: tl.constexpr, grid_n: tl.constexpr, GROUP_M: tl.constexpr

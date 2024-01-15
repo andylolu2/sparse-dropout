@@ -4,7 +4,7 @@ import torch.types
 
 from flash_dropout.types import size
 
-from .utils import blockwise_dropout_mask, structured_dropout_mask
+from .utils import blockwise_dropout_mask
 
 
 def blockwise_dropout(
@@ -20,19 +20,6 @@ def blockwise_dropout(
     input_blocks[~mask] /= 1 - p
 
     return input
-
-
-def structured_blockwise_dropout_matmul(
-    input: torch.Tensor,
-    weight: torch.Tensor,
-    block_size: size,
-    p: float,
-    training: bool = True,
-):
-    if training:
-        mask = structured_dropout_mask(input, block_size, p).to(input.device)
-        input = blockwise_dropout(input, mask, block_size, p)
-    return input @ weight
 
 
 def blockwise_dropout_matmul(

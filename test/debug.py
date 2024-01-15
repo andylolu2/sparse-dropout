@@ -3,9 +3,6 @@ import torch
 
 from flash_dropout.cuda.binding import FlashDropoutCUDA
 
-# from flash_dropout.functional.blockwise_dropout_matmul_triton import (
-#     blockwise_dropout_matmul,
-# )
 from flash_dropout.functional.naive import (
     blockwise_dropout,
     blockwise_dropout_mask,

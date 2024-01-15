@@ -2,7 +2,9 @@
 
 SparseDrop is a simple, structured, and hardware-friendly variant of dropout that can benefit from sparsity on GPUs. 
 
-See [PROJECT_PLAN.md](PROJECT_PLAN.md) for more info.
+See [PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the project's goals and motivations.
+
+See [NOTES.md](docs/NOTES.md) for the development logs and notes.
 
 ## Reproduce results
 

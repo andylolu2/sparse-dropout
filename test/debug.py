@@ -2,11 +2,9 @@ import lightning as L
 import torch
 
 from flash_dropout.cuda.binding import FlashDropoutCUDA
-
 from flash_dropout.functional.naive import (
-    blockwise_dropout,
     blockwise_dropout_mask,
-    blockwise_dropout_matmul,
+    blockwise_dropout_matmul_mask,
 )
 
 L.seed_everything(0)
@@ -14,14 +12,15 @@ torch.set_printoptions(sci_mode=False, edgeitems=5, linewidth=5000)
 
 M, N, K = 2048, 1024, 1024
 # M, N, K = 128 * 32, 512 * 4, 512
-block_size = (128, 128)
+block_size = 128
 p = 0.0
 
 
-def ref(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, dC: torch.Tensor):
-    A = blockwise_dropout(A, mask, block_size, p)
-    C = A @ B.T
-    return C, blockwise_dropout(dC @ B, mask, block_size, p), dC.T @ A
+def ref(A: torch.Tensor, mask: torch.Tensor, B: torch.Tensor, dC: torch.Tensor):
+    A, B = A.clone().requires_grad_(), B.clone().requires_grad_()
+    C = blockwise_dropout_matmul_mask(A, mask, block_size, p, B)
+    C.backward(dC)
+    return C, A.grad, B.grad
 
 
 def cuda_impl(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, dC: torch.Tensor):

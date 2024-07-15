@@ -11,8 +11,12 @@ import torch.types
 
 import flash_dropout.functional as F
 from flash_dropout.cuda.binding import FlashDropoutCUDA
+from flash_dropout.functional.utils import blockwise_dropout_mask
+from flash_dropout.triton.dsd_matmul import blockwise_dsd_matmul
+from flash_dropout.triton.sdd_matmul import blockwise_sdd_matmul
 
-block_size = (128, 128)
+block_size = 128
+CACHE = {}
 
 
 def f_naive(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
@@ -57,32 +61,60 @@ def f_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
     yield dA, dB
 
 
-def f_triton(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
-    C = F.triton_blockwise_dropout_matmul(A, B, block_size, p)
+def f_triton_fixed_mask(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
+    """
+    Args:
+        A: M K
+        B: N K
+        dC: M N
+    """
+    if f"triton_{p}" not in CACHE:
+        mask = blockwise_dropout_mask(A, block_size, p)
+        mask_T = mask.T
+        table = torch.nonzero(~mask, as_tuple=False)
+        CACHE[f"triton_{p}"] = (mask, mask_T, table)
+    else:
+        mask, mask_T, table = CACHE[f"triton_{p}"]
+    C = blockwise_dsd_matmul(A, mask, B.T, block_size, 1 / (1 - p))
     yield C
 
-    C.backward(dC)
-    yield A.grad, B.grad
+    dA = blockwise_sdd_matmul(dC, B, table, block_size, 1 / (1 - p))
+    dB = blockwise_dsd_matmul(A.T, mask_T, dC, block_size, 1 / (1 - p)).T
+    yield dA, dB
 
 
-def do_bench_detailed(fn, warmup=0.5, rep=0.2):
+def f_triton(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
+    """
+    Args:
+        A: M K
+        B: N K
+        dC: M N
+    """
+    mask = blockwise_dropout_mask(A, block_size, p)
+    C = blockwise_dsd_matmul(A, mask, B.T, block_size, 1 / (1 - p))
+    yield C
+
+    mask_T = mask.T
+    table = torch.nonzero(~mask, as_tuple=False)
+    dA = blockwise_sdd_matmul(dC, B, table, block_size, 1 / (1 - p))
+    dB = blockwise_dsd_matmul(A.T, mask_T, dC, block_size, 1 / (1 - p)).T
+    yield dA, dB
+
+
+def do_bench_detailed(fn, warmup: int = 10, rep: float = 0.5):
     n_breakpoints = 0
     for _ in fn():
         n_breakpoints += 1
-    torch.cuda.synchronize()
 
-    cache = torch.empty(int(4e6 // 8), dtype=torch.int64, device="cuda")
+    cache = torch.empty(4 * 1024**2, dtype=torch.int8, device="cuda")
 
-    events = []
-
-    start_time = time.time()
-    while time.time() - start_time < warmup:
+    for _ in range(warmup):
         cache.zero_()
         for _ in fn():
             pass
-        torch.cuda.synchronize()
 
     # Benchmark
+    events = []
     start_time = time.time()
     while time.time() - start_time < rep:
         breakpoint_events = [
@@ -94,13 +126,12 @@ def do_bench_detailed(fn, warmup=0.5, rep=0.2):
         cache.zero_()
         f = iter(fn())
         for start, end in breakpoint_events:
-            start.record()
+            start.record()  # type: ignore
             next(f)
-            end.record()
+            end.record()  # type: ignore
         torch.cuda.synchronize()
 
     # Record clocks
-    torch.cuda.synchronize()
     breakpoint_times = []
     for breakpoint_events in events:
         times = []
@@ -137,8 +168,9 @@ if __name__ == "__main__":
     }
 
     sparse_fs = {
-        "SparseDrop": lambda p: f_cuda(A, B, dC, p),
-        # "SparseDrop Triton": lambda p: f_triton(A, B, dC, p),
+        # "SparseDrop": lambda p: f_cuda(A, B, dC, p),
+        # "Triton": lambda p: f_triton(A, B, dC, p),
+        "Triton (fixed mask)": lambda p: f_triton_fixed_mask(A, B, dC, p),
     }
 
     dense_data = {}
@@ -163,9 +195,9 @@ if __name__ == "__main__":
         }
 
     data = []
-    for name, fn in sparse_fs.items():
+    for name, sparse_fn in sparse_fs.items():
         for p in np.arange(0.0, 1.0, 0.05):
-            timings = do_bench_detailed(lambda: fn(p))
+            timings = do_bench_detailed(lambda: sparse_fn(p))
             for breakpoint_name, timing in zip(breakpoint_names, timings):
                 for t in timing:
                     data.append(

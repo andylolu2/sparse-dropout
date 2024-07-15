@@ -1,4 +1,3 @@
-from functools import partial
 from itertools import product
 from math import ceil
 from typing import Any
@@ -8,16 +7,11 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-from flash_dropout.types import size
 
-
-def blockwise_dropout_mask(x: torch.Tensor, block_size: size, p: float):
-    """Creates a blockwise dropout mask for a matrix.
-
-    Returns a mask tensor on the *CPU*.
-    """
+def blockwise_dropout_mask(x: torch.Tensor, block_size: int, p: float):
+    """Creates a blockwise dropout mask for a matrix."""
     *b, m, k = x.shape
-    mask_shape = (ceil(m / block_size[0]), ceil(k / block_size[1]))
+    mask_shape = (ceil(m / block_size), ceil(k / block_size))
     mask = torch.rand(*b, *mask_shape, device=x.device) < p
     return mask
 
@@ -81,7 +75,7 @@ def threadblock_swizzle(
 ) -> tuple[tl.tensor, tl.tensor]:
     width = GROUP_M * grid_n
     group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
+    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)  # type: ignore
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
     return pid_m, pid_n

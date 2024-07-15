@@ -52,7 +52,7 @@ class DropoutMM(nn.Module):
                 )
             case "blockwise[triton]":
                 output = F.triton_blockwise_dropout_matmul(
-                    input, self.weight.T, self.kwargs["block_size"], self.p
+                    input, self.weight, self.kwargs["block_size"], self.p
                 )
             case "blockwise[cuda]":
                 output = F.cuda_blockwise_dropout_matmul(

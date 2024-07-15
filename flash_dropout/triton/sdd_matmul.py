@@ -4,17 +4,26 @@ import triton
 import triton.language as tl
 
 from flash_dropout.functional.utils import config_product, min_dtype
+from flash_dropout.triton.utils import filter_invalid_configs
 
 
 @triton.autotune(
     configs=config_product(
         num_warps=[4, 8],
         num_stages=[1],
-        BLOCK_M=[128],
-        BLOCK_N=[64],
-        BLOCK_K=[64],
+        BLOCK_M=[64, 128],
+        BLOCK_N=[64, 128],
+        BLOCK_K=[32, 64],
     ),
     key=["M", "N", "K", "BLOCK_SIZE"],
+    prune_configs_by={
+        "perf_model": None,
+        "top_k": None,
+        "early_config_prune": filter_invalid_configs(
+            ["BLOCK_M", "BLOCK_N"]
+        ),  # makes sure that the chosen BLOCK_M and BLOCK_N divides BLOCK_SIZE
+    },
+    warmup=100,
 )
 @triton.jit
 def blockwise_sdd_matmul_kernel(

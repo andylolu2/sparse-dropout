@@ -153,7 +153,8 @@ if __name__ == "__main__":
     # M, N, K = b * s, d * 4, d
     # M, N, K = b * s, d, d * 4
     # M, N, K = b * s, d, 3 * d
-    M, N, K = 1024, 1024, 1024
+    # M, N, K = 1024, 1024, 1024
+    M, N, K = 2048, 2048, 2048
 
     A = torch.randn((M, K), device="cuda", dtype=torch.float16, requires_grad=True)
     B = torch.randn((N, K), device="cuda", dtype=torch.float16, requires_grad=True)
@@ -169,7 +170,7 @@ if __name__ == "__main__":
 
     sparse_fs = {
         # "SparseDrop": lambda p: f_cuda(A, B, dC, p),
-        # "Triton": lambda p: f_triton(A, B, dC, p),
+        "Triton": lambda p: f_triton(A, B, dC, p),
         "Triton (fixed mask)": lambda p: f_triton_fixed_mask(A, B, dC, p),
     }
 
@@ -178,20 +179,16 @@ if __name__ == "__main__":
         timings = do_bench_detailed(fn, warmup=1, rep=1)
         dense_data[name] = {}
         for breakpoint_name, timing in zip(breakpoint_names, timings):
-            avg = timing.mean().item()
-            std_err = timing.std().item() / math.sqrt(timing.shape[0])
+            median = timing.median().item()
             dense_data[name][breakpoint_name] = {
-                "avg": avg,
-                "std": std_err,
-                "flops": 2 * M * N * K / (avg / 1000),
+                "median": median,
+                "flops": 2 * M * N * K / (median / 1000),
             }
         full_timings = timings.sum(dim=0)
-        avg = full_timings.mean().item()
-        std_err = full_timings.std().item() / math.sqrt(full_timings.shape[0])
+        median = full_timings.median().item()
         dense_data[name]["full"] = {
-            "avg": avg,
-            "std": std_err,
-            "flops": 6 * M * N * K / (avg / 1000),
+            "median": median,
+            "flops": 6 * M * N * K / (median / 1000),
         }
 
     data = []
@@ -228,17 +225,8 @@ if __name__ == "__main__":
 
         sub_df = df[df["breakpoint"] == breakpoint_name]
         for i, (name, item) in enumerate(dense_data.items()):
-            avg = item[breakpoint_name]["avg"]
-            ax.axhline(avg, label=name, linestyle="--", color=f"C{i+1}")
-            # lower = avg - 1.96 * item[breakpoint_name]["std"]
-            # upper = avg + 1.96 * item[breakpoint_name]["std"]
-            # ax.fill_between(
-            #     [0, 1],
-            #     [lower, lower],
-            #     [upper, upper],
-            #     color=f"C{i+1}",
-            #     alpha=0.2,
-            # )
+            median = item[breakpoint_name]["median"]
+            ax.axhline(median, label=name, linestyle="--", color=f"C{i+1}")
 
         sns.lineplot(
             data=sub_df,

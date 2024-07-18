@@ -1,0 +1,16 @@
+torch~=2.1
+triton~=2.1.0
+numpy~=1.26
+lightning~=2.1
+ml-collections~=0.1
+matplotlib~=3.8
+pandas~=2.1
+ninja~=1.11.1
+torchvision~=0.16
+datasets~=2.16
+transformers~=4.36
+wandb~=0.16
+seaborn~=0.13
+scienceplots~=2.1
+einops~=0.7
+pytest~=7.4

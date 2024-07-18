@@ -161,6 +161,10 @@ void matmul_sdd(ct::Tensor<Gmem<typename KernelTraits::T>, typename KernelTraits
     assert(ct::size<0>(B) % KernelTraits::BLK_N == 0);
     assert(ct::size<1>(A) % KernelTraits::BLK_K == 0);
 
+    if (count == 0) {
+        return;
+    }
+
     dim3 block_dim(count);
     dim3 thread_dim(KernelTraits::NumThreads);
 

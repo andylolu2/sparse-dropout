@@ -1,5 +1,5 @@
-import math
 import time
+from pathlib import Path
 
 import lightning as L
 import matplotlib.pyplot as plt
@@ -123,7 +123,7 @@ def do_bench_detailed(fn, warmup: int = 10, rep: float = 0.5):
         ]
         events.append(breakpoint_events)
 
-        cache.zero_()
+        # cache.zero_()
         f = iter(fn())
         for start, end in breakpoint_events:
             start.record()  # type: ignore
@@ -169,14 +169,14 @@ if __name__ == "__main__":
     }
 
     sparse_fs = {
-        # "SparseDrop": lambda p: f_cuda(A, B, dC, p),
+        "CUDA": lambda p: f_cuda(A, B, dC, p),
         "Triton": lambda p: f_triton(A, B, dC, p),
         "Triton (fixed mask)": lambda p: f_triton_fixed_mask(A, B, dC, p),
     }
 
     dense_data = {}
     for name, fn in dense_fs.items():
-        timings = do_bench_detailed(fn, warmup=1, rep=1)
+        timings = do_bench_detailed(fn)
         dense_data[name] = {}
         for breakpoint_name, timing in zip(breakpoint_names, timings):
             median = timing.median().item()
@@ -220,6 +220,9 @@ if __name__ == "__main__":
     df = pd.DataFrame(data)
     df.rename(columns={"name": "Method"}, inplace=True)
 
+    log_dir = Path("./logs")
+    log_dir.mkdir(exist_ok=True, parents=True)
+
     for breakpoint_name in df["breakpoint"].unique():
         fig, ax = plt.subplots(figsize=(5, 4))
 
@@ -235,6 +238,7 @@ if __name__ == "__main__":
             hue="Method",
             marker="o",
             markersize=4,
+            estimator=np.median,
             errorbar=None,
             ax=ax,
         )
@@ -245,7 +249,7 @@ if __name__ == "__main__":
         )
         fig.tight_layout()
         fig.savefig(
-            f"./logs/matmul-detailed_m{M}n{N}k{K}_{breakpoint_name}.png", dpi=300
+            log_dir / f"matmul-detailed_m{M}n{N}k{K}_{breakpoint_name}.png", dpi=300
         )
 
         fig, ax = plt.subplots(figsize=(5, 4))
@@ -266,6 +270,7 @@ if __name__ == "__main__":
             hue="Method",
             marker="o",
             markersize=4,
+            estimator=np.median,
             errorbar=None,
             ax=ax,
         )
@@ -276,5 +281,6 @@ if __name__ == "__main__":
         )
         fig.tight_layout()
         fig.savefig(
-            f"./logs/matmul-detailed_m{M}n{N}k{K}_{breakpoint_name}_flops.png", dpi=300
+            log_dir / f"matmul-detailed_m{M}n{N}k{K}_{breakpoint_name}_flops.png",
+            dpi=300,
         )

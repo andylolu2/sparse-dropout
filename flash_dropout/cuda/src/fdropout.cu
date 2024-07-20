@@ -77,7 +77,7 @@ torch::Tensor forward_core(torch::Tensor A, torch::Tensor B, float p, torch::Ten
     auto A_ct = torch_to_ct_2d<ct::half_t, ct::GenRowMajor>(A);
     auto B_ct = torch_to_ct_2d<ct::half_t, ct::GenRowMajor>(B);
     auto C_ct = torch_to_ct_2d<ct::half_t, ct::GenRowMajor>(C);
-    auto mask_ct = torch_to_ct_2d<ct::uint64_t, ct::GenRowMajor>(mask);
+    auto mask_ct = torch_to_ct_2d<ct::uint8_t, ct::GenRowMajor>(mask);
 
     matmul_dsd<KernelTraits>(A_ct, B_ct, C_ct, mask_ct, static_cast<ct::half_t>(1 / (1 - p)));
     return C;
@@ -90,9 +90,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, int64_t> 
 
     constexpr int BLK_M = std::lcm(JIT_BLK_M_0, std::lcm(JIT_BLK_M_1, JIT_BLK_M_2));
     constexpr int BLK_K = std::lcm(JIT_BLK_K_0, std::lcm(JIT_BLK_K_1, JIT_BLK_K_2));
-    auto [mask, mask_T, mask_table, count] =
-        make_mask<BLK_M, BLK_K, JIT_BLK_M_0, JIT_BLK_K_0, JIT_BLK_M_1, JIT_BLK_K_1, JIT_BLK_M_2,
-                  JIT_BLK_K_2>(A.size(0), A.size(1), p);
+    auto [mask, mask_T, mask_table, count] = make_mask(A.size(0), A.size(1), 128, p);
+    // make_mask<BLK_M, BLK_K, JIT_BLK_M_0, JIT_BLK_K_0, JIT_BLK_M_1, JIT_BLK_K_1, JIT_BLK_M_2,
+    //   JIT_BLK_K_2>(A.size(0), A.size(1), p);
     auto C = forward_core<KernelTraits>(A, B, p, mask);
     return {C, mask, mask_T, mask_table, count};
 }
@@ -150,7 +150,7 @@ torch::Tensor backward_dB(torch::Tensor dC, torch::Tensor A, torch::Tensor mask_
     auto A_T_ct = torch_to_ct_2d<ct::half_t, ct::GenColMajor>(A.t());
     auto dB_T_ct = torch_to_ct_2d<ct::half_t, ct::GenColMajor>(dB.t());
     auto dC_T_ct = torch_to_ct_2d<ct::half_t, ct::GenColMajor>(dC.t());
-    auto mask_T_ct = torch_to_ct_2d<ct::uint64_t, ct::GenRowMajor>(mask_T);
+    auto mask_T_ct = torch_to_ct_2d<ct::uint8_t, ct::GenRowMajor>(mask_T);
 
     using KernelTraits = KernelTraits<ct::half_t, JIT_BLK_K_2, JIT_BLK_N_2, JIT_BLK_M_2,
                                       JIT_GROUP_2, false, false, false>;

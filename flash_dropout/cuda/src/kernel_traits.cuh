@@ -15,7 +15,7 @@ template <typename scalar_t, int BLK_M_, int BLK_N_, int BLK_K_, int GroupSizeM_
           bool RowMajorB, bool RowMajorC>
 struct KernelTraits {
     using T = scalar_t;
-    using TMask = ct::uint64_t;
+    using TMask = ct::uint8_t;
 
    public:
     static constexpr int BLK_M = BLK_M_;

@@ -26,7 +26,7 @@ class FlashDropoutCUDA:
                 "flash_dropout/cuda/cutlass/tools/util/include",
             ],
             extra_cuda_cflags=[
-                "-std=c++17",
+                "-std=c++20",
                 "-O3",
                 "--threads",
                 "8",

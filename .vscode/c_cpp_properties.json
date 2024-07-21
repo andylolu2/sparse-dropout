@@ -11,13 +11,13 @@
                 "/opt/conda/lib/python3.10/site-packages/torch/include/torch/csrc/api/include",
                 "/opt/conda/include/python3.10",
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/flash_dropout/cuda/cutlass/include",
-                "${workspaceFolder}/flash_dropout/cuda/cutlass/tools/util/include"
+                // "${workspaceFolder}/flash_dropout/cuda/cutlass/include",
+                // "${workspaceFolder}/flash_dropout/cuda/cutlass/tools/util/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "c17",
-            "cppStandard": "gnu++20",
+            "cppStandard": "c++20",
             "intelliSenseMode": "linux-gcc-x64"
         }
     ],

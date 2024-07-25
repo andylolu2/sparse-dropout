@@ -21,7 +21,7 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
         mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
 
         # C (M N) = A (M K sparse) * B (N K)
-        C = ext.gemm_dsd(input, weight, mask, block_size)
+        C = ext.gemm_dsd(input, weight, mask, block_size, 1 / (1 - p))
 
         ctx.save_for_backward(input, weight, mask)
         ctx.block_size = block_size  # type: ignore
@@ -41,10 +41,12 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
 
         ext = GEMM()
         # dA (M K sparse) = dC (M N) * B.T (K N)
-        grad_input = ext.gemm_sdd(grad_output, weight.T, mask, block_size)
+        grad_input = ext.gemm_sdd(grad_output, weight.T, mask, block_size, 1 / (1 - p))
         # dB (N K) = dC.T (N M) * A.T (K M sparse)
         #          = (A.T (K M sparse) * dC.T (N M)).T
-        grad_weight = ext.gemm_dsd(input.T, grad_output.T, mask.T, block_size).T
+        grad_weight = ext.gemm_dsd(
+            input.T, grad_output.T, mask.T, block_size, 1 / (1 - p)
+        ).T
         # grad_input = impl.backward_dA(grad_output, weight, mask_table, p, count)
         # grad_weight = impl.backward_dB(grad_output, input, mask_T, p)
 

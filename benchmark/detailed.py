@@ -10,7 +10,10 @@ import torch
 import torch.types
 
 import flash_dropout.functional as F
-from flash_dropout.cuda.binding import FlashDropoutCUDA
+from flash_dropout.cuda.binding_gemm import GEMM
+from flash_dropout.functional.blockwise_dropout_matmul_cuda import (
+    blockwise_dropout_matmul as blockwise_dropout_matmul_cuda,
+)
 from flash_dropout.functional.utils import blockwise_dropout_mask
 from flash_dropout.triton.dsd_matmul import blockwise_dsd_matmul
 from flash_dropout.triton.sdd_matmul import blockwise_sdd_matmul
@@ -43,22 +46,22 @@ def f_baseline(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
     yield A.grad, B.grad
 
 
-def f_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
-    impl = FlashDropoutCUDA(
-        BLK_MNK_GROUP_0=(128, 128, 64, 5),
-        BLK_MNK_GROUP_1=(128, 64, 128, 5),
-        BLK_MNK_GROUP_2=(64, 128, 128, 5),
-        # BLK_MNK_GROUP_0=(64, 64, 64, 5),
-        # BLK_MNK_GROUP_1=(64, 64, 64, 5),
-        # BLK_MNK_GROUP_2=(64, 64, 64, 5),
-    )
-
-    C, mask, mask_T, mask_table, count = impl.forward(A, B, p)
+def f_dense_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor):
+    ext = GEMM()
+    C = ext.gemm(A, B)
     yield C
 
-    dA = impl.backward_dA(dC, B, mask_table, p, count)
-    dB = impl.backward_dB(dC, A, mask_T, p)
+    dA = ext.gemm(dC, B.T)
+    dB = ext.gemm(A.T, dC.T).T
     yield dA, dB
+
+
+def f_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
+    C = blockwise_dropout_matmul_cuda(A, B, block_size, p)
+    yield C
+
+    C.backward(dC)
+    yield A.grad, B.grad
 
 
 def f_triton_fixed_mask(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
@@ -154,7 +157,8 @@ if __name__ == "__main__":
     # M, N, K = b * s, d, d * 4
     # M, N, K = b * s, d, 3 * d
     # M, N, K = 1024, 1024, 1024
-    M, N, K = 2048, 2048, 2048
+    # M, N, K = 2048, 2048, 2048
+    M, N, K = 4096, 4096, 4096
 
     A = torch.randn((M, K), device="cuda", dtype=torch.float16, requires_grad=True)
     B = torch.randn((N, K), device="cuda", dtype=torch.float16, requires_grad=True)
@@ -164,14 +168,15 @@ if __name__ == "__main__":
 
     dense_fs = {
         "Dense": lambda: f_dense(A, B, dC),
+        "Dense CUDA": lambda: f_dense_cuda(A, B, dC),
         "Dropout + Dense": lambda: f_baseline(A, B, dC, 0.5),
         "Block dropout + Dense": lambda: f_naive(A, B, dC, 0.5),
     }
 
     sparse_fs = {
         "CUDA": lambda p: f_cuda(A, B, dC, p),
-        "Triton": lambda p: f_triton(A, B, dC, p),
-        "Triton (fixed mask)": lambda p: f_triton_fixed_mask(A, B, dC, p),
+        # "Triton": lambda p: f_triton(A, B, dC, p),
+        # "Triton (fixed mask)": lambda p: f_triton_fixed_mask(A, B, dC, p),
     }
 
     dense_data = {}

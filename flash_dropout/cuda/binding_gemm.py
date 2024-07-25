@@ -3,7 +3,7 @@ from torch.utils.cpp_extension import load
 
 
 class GEMM:
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
         """Load and JIT compile the extension module"""
         self.ext = load(
             name="gemm",
@@ -16,21 +16,31 @@ class GEMM:
             extra_cuda_cflags=[
                 "-keep",
             ],
-            verbose=True,
+            verbose=verbose,
         )
 
     def gemm(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         return self.ext.gemm(A, B)  # type: ignore
 
     def gemm_dsd(
-        self, A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, block_size: int
+        self,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        mask: torch.Tensor,
+        block_size: int,
+        scale: float,
     ) -> torch.Tensor:
-        return self.ext.gemm_dsd(A, B, mask, block_size)  # type: ignore
+        return self.ext.gemm_dsd(A, B, mask, block_size, scale)  # type: ignore
 
     def gemm_sdd(
-        self, A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, block_size: int
+        self,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        mask: torch.Tensor,
+        block_size: int,
+        scale: float,
     ) -> torch.Tensor:
-        return self.ext.gemm_sdd(A, B, mask, block_size)  # type: ignore
+        return self.ext.gemm_sdd(A, B, mask, block_size, scale)  # type: ignore
 
 
 if __name__ == "__main__":
@@ -47,7 +57,7 @@ if __name__ == "__main__":
         else:  # column major
             return torch.randn(n, m, dtype=torch.float16, device="cuda").T
 
-    ext = GEMM()
+    ext = GEMM(verbose=True)
 
     def compare(x: torch.Tensor, y: torch.Tensor):
         abs_err_pct = (torch.abs(x - y) > 1e-1).float().mean().item()
@@ -58,24 +68,25 @@ if __name__ == "__main__":
         print(f"Abs err: {abs_err_pct:.2%} Rel err: {rel_err_pct:.2%}")
         print(f"Max abs err: {max_abs_err:.2e} Max rel err: {max_rel_err:.2e}")
 
-    def test(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, block_size: int):
-        # print(mask.to(torch.uint8))
-        # for _ in range(5):
-        C = ext.gemm_dsd(A, B, mask, block_size).float()
-        print(f"{C=}")
-        # C = ext.gemm(A, B).float()
-        C_ref = blockwise_dropout_matmul_mask(A.float(), mask, block_size, 0, B.float())
-        # C_ref = A.float() @ B.float().T
-        # print(f"{C_ref=}")
-        # print(f"{C - C_ref=}")
+    # def test(A: torch.Tensor, B: torch.Tensor, mask: torch.Tensor, block_size: int):
+    #     # print(mask.to(torch.uint8))
+    #     # for _ in range(5):
+    #     C = ext.gemm_dsd(A, B, mask, block_size).float()
+    #     print(f"{C=}")
+    #     # C = ext.gemm(A, B).float()
+    #     C_ref = blockwise_dropout_matmul_mask(A.float(), mask, block_size, p, B.float())
+    #     # C_ref = A.float() @ B.float().T
+    #     # print(f"{C_ref=}")
+    #     # print(f"{C - C_ref=}")
 
-        compare(C, C_ref)
+    #     compare(C, C_ref)
 
     M, N, K = 512, 512, 512
     # M, N, K = 1024, 1024, 512
     # M, N, K = 2048, 2048, 2048
     block_size = 128
-    mask = torch.rand(M // block_size, K // block_size, device="cuda") < 0.1
+    p = 0.1
+    mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
     # mask = torch.zeros(
     #     M // block_size, K // block_size, device="cuda", dtype=torch.bool
     # )
@@ -91,20 +102,21 @@ if __name__ == "__main__":
 
         print("DSD")
         print(f"A ({tuple(A.shape)}:{A.stride()}) B ({tuple(B.shape)}:{B.stride()})")
-        C = ext.gemm_dsd(A, B, mask, block_size)
-        C_ref = blockwise_dropout_matmul_mask(A.float(), mask, block_size, 0, B.float())
+        C = ext.gemm_dsd(A, B, mask, block_size, 1 / (1 - p))
+        C_ref = blockwise_dropout_matmul_mask(A.float(), mask, block_size, p, B.float())
         compare(C, C_ref)
         print()
 
         print("SDD")
         print(f"A ({tuple(A.shape)}:{A.stride()}) B ({tuple(B.shape)}:{B.stride()})")
-        C = ext.gemm_sdd(A, B, mask, block_size)
+        C = ext.gemm_sdd(A, B, mask, block_size, 1 / (1 - p))
         C_ref = (
             (A.float() @ B.float().T)
             .view(M // block_size, block_size, N // block_size, block_size)
             .permute(0, 2, 1, 3)
         )
         C_ref[mask] = 0
+        C_ref *= 1 / (1 - p)
         C_ref = C_ref.permute(0, 2, 1, 3).reshape(M, N)
         # print(f"{C - C_ref=}")
         compare(C, C_ref)

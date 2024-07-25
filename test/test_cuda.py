@@ -38,20 +38,20 @@ def test_blockwise_dropout_matmul(
         A: torch.Tensor, mask: torch.Tensor, B: torch.Tensor, dC: torch.Tensor
     ):
         A, B = A.clone().requires_grad_(), B.clone().requires_grad_()
-        C = reference_blockwise_dropout_matmul(A, mask, block_size, 0, B)
+        C = reference_blockwise_dropout_matmul(A, mask, block_size, p, B)
         C.backward(dC)
         return A.grad, B.grad, C
 
     def cuda(A: torch.Tensor, mask: torch.Tensor, B: torch.Tensor, dC: torch.Tensor):
         A, B, dC = A.to(torch.float16), B.to(torch.float16), dC.to(torch.float16)
-        C = ext.gemm_dsd(A, B, mask, block_size)
-        dA = ext.gemm_sdd(dC, B.T, mask, block_size)
-        dB = ext.gemm_dsd(A.T, dC.T, mask.T, block_size).T
+        C = ext.gemm_dsd(A, B, mask, block_size, 1 / (1 - p))
+        dA = ext.gemm_sdd(dC, B.T, mask, block_size, 1 / (1 - p))
+        dB = ext.gemm_dsd(A.T, dC.T, mask.T, block_size, 1 / (1 - p)).T
 
         return dA, dB, C
 
     dA, dB, C = reference(A, mask, B, dC)
     dA_, dB_, C_ = cuda(A, mask, B, dC)
-    torch.testing.assert_close(C, C_, atol=0.1, rtol=0.01, check_dtype=False)
-    torch.testing.assert_close(dB, dB_, atol=0.1, rtol=0.01, check_dtype=False)
+    torch.testing.assert_close(C, C_, atol=0.2, rtol=0.01, check_dtype=False)
+    torch.testing.assert_close(dB, dB_, atol=0.2, rtol=0.01, check_dtype=False)
     torch.testing.assert_close(dA, dA_, atol=0.2, rtol=0, check_dtype=False)

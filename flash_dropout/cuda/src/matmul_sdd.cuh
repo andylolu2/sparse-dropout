@@ -20,7 +20,8 @@ template <typename Config, typename LayoutA, typename LayoutB, typename LayoutC,
 __global__ void gemm_sdd_kernel(ct::Tensor<Gmem<ct::half_t>, LayoutA> A,
                                 ct::Tensor<Gmem<ct::half_t>, LayoutB> B,
                                 ct::Tensor<Gmem<ct::half_t>, LayoutC> C,
-                                ct::Tensor<Gmem<bool>, LayoutMask> mask, int64_t block_size) {
+                                ct::Tensor<Gmem<bool>, LayoutMask> mask, int64_t block_size,
+                                float scale) {  
     // Threadblock-level paratitioning
     auto [block_idx_m, block_idx_n] =
         threadblock_swizzle(blockIdx.x, ct::size<0>(A) / Config::BLK_M,
@@ -62,6 +63,7 @@ __global__ void gemm_sdd_kernel(ct::Tensor<Gmem<ct::half_t>, LayoutA> A,
             smem_gemm(sA, sB);
         }
     }
+    smem_gemm.scale(scale);
     smem_gemm.write_back();
 }
 
@@ -71,7 +73,7 @@ template <typename Config, typename LayoutA, typename LayoutB, typename LayoutC,
 void gemm_sdd(const ct::Tensor<Gmem<ct::half_t>, LayoutA> &A,
               const ct::Tensor<Gmem<ct::half_t>, LayoutB> &B,
               const ct::Tensor<Gmem<ct::half_t>, LayoutC> &C,
-              const ct::Tensor<Gmem<bool>, LayoutMask> &mask, int64_t block_size) {
+              const ct::Tensor<Gmem<bool>, LayoutMask> &mask, int64_t block_size, float scale) {
     assert(ct::size<0>(A) == ct::size<0>(C));  // M
     assert(ct::size<0>(B) == ct::size<1>(C));  // N
     assert(ct::size<1>(A) == ct::size<1>(B));  // K
@@ -93,5 +95,5 @@ void gemm_sdd(const ct::Tensor<Gmem<ct::half_t>, LayoutA> &A,
     dim3 block_dim((M / Config::BLK_M) * (N / Config::BLK_N));
     dim3 thread_dim(Config::NumThreads);
 
-    gemm_sdd_kernel<Config><<<block_dim, thread_dim>>>(A, B, C, mask, block_size);
+    gemm_sdd_kernel<Config><<<block_dim, thread_dim>>>(A, B, C, mask, block_size, scale);
 }

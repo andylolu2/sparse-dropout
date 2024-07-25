@@ -58,6 +58,13 @@ struct SmemGemm {
         __syncthreads();
     }
 
+    __device__ void scale(float alpha) {
+        CUTE_UNROLL
+        for (int i = 0; i < ct::size(C_frag); ++i) {
+            C_frag[i] *= alpha;
+        }
+    }
+
     // Write back result to gmem
     __device__ void write_back() {
         auto C_frag_out = thread_mma.partition_C(C);  // Corresponding location in output tensor

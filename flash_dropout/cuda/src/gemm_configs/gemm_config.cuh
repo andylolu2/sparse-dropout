@@ -23,17 +23,17 @@ struct GemmConfigImpl {
     static constexpr int64_t BLK_M = 128;
     static constexpr int64_t BLK_N = 128;
     static constexpr int64_t BLK_K = 64;
-    static constexpr int64_t GroupSizeM = 6;    // Generally want to choose ~= sqrt(no. of SMs).
+    static constexpr int64_t GroupSizeM = 5;    // Generally want to choose ~= sqrt(no. of SMs).
     static constexpr int64_t NumThreads = 128;  // 4 warps
 
    private:
     using RowMajorLayout = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<int64_t, Int<1>>>;
     using ColMajorLayout = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<Int<1>, int64_t>>;
 
-//    public:
-//     using LayoutA = std::conditional_t<RowMajorA, RowMajorLayout, ColMajorLayout>;
-//     using LayoutB = std::conditional_t<RowMajorB, RowMajorLayout, ColMajorLayout>;
-//     using LayoutC = RowMajorLayout;
+    //    public:
+    //     using LayoutA = std::conditional_t<RowMajorA, RowMajorLayout, ColMajorLayout>;
+    //     using LayoutB = std::conditional_t<RowMajorB, RowMajorLayout, ColMajorLayout>;
+    //     using LayoutC = RowMajorLayout;
 
    private:
     static constexpr int AccessSizeBits = 128;
@@ -91,7 +91,7 @@ struct GemmConfigImpl {
 
     // The atom for the MMA operation. Each atom is a warp-wise instruction that computes a 16x8x8
     // mma (with tensor cores).
-    using MmaAtom = ct::MMA_Atom<ct::SM75_16x8x8_F32F16F16F32_TN>;
+    using MmaAtom = ct::MMA_Atom<ct::SM80_16x8x16_F32F16F16F32_TN>;
     // We have 128 threads, so we use 4 warps laid out in 2x2x1.
     using MmaAtomLayout = ct::Layout<ct::Shape<Int<2>, Int<2>, Int<1>>>;
     // We want to use the `ldmatrix.x4.m8n8` instruction which loads 4 8x8 matrices for maximum

@@ -59,7 +59,7 @@ torch::Tensor gemm_cuda(torch::Tensor A, torch::Tensor B) {
 
 template <bool RowMajorA, bool RowMajorB, bool RowMajorMask>
 torch::Tensor gemm_dsd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tensor mask,
-                                  int64_t block_size) {
+                                  int64_t block_size, float scale) {
     // Allocate output tensor (M x N)
     auto C = torch::empty({A.size(0), B.size(0)}, A.options());
 
@@ -74,22 +74,25 @@ torch::Tensor gemm_dsd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tenso
         torch_to_ct_2d<bool, std::conditional_t<RowMajorMask, ct::GenRowMajor, ct::GenColMajor>>(
             mask);
 
-    gemm_dsd<GemmConfigImpl<RowMajorA, RowMajorB>>(A_ct, B_ct, C_ct, mask_ct, block_size);
+    gemm_dsd<GemmConfigImpl<RowMajorA, RowMajorB>>(A_ct, B_ct, C_ct, mask_ct, block_size, scale);
     return C;
 }
 
 template <bool... RowMajors, typename... Ts>
 torch::Tensor gemm_dsd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tensor mask,
-                                  int64_t block_size, bool row_major, Ts... row_majors) {
+                                  int64_t block_size, float scale, bool row_major,
+                                  Ts... row_majors) {
     if (row_major) {
-        return gemm_dsd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, row_majors...);
+        return gemm_dsd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, scale,
+                                                       row_majors...);
     } else {
-        return gemm_dsd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, row_majors...);
+        return gemm_dsd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, scale,
+                                                        row_majors...);
     }
 }
 
 torch::Tensor gemm_dsd_cuda(torch::Tensor A, torch::Tensor B, torch::Tensor mask,
-                            int64_t block_size) {
+                            int64_t block_size, float scale) {
     check_operand(A);
     check_operand(B);
     check_operand(mask);
@@ -99,12 +102,13 @@ torch::Tensor gemm_dsd_cuda(torch::Tensor A, torch::Tensor B, torch::Tensor mask
     bool row_major_A = A.stride(1) == 1;
     bool row_major_B = B.stride(1) == 1;
     bool row_major_mask = mask.stride(1) == 1;
-    return gemm_dsd_cuda_inner<>(A, B, mask, block_size, row_major_A, row_major_B, row_major_mask);
+    return gemm_dsd_cuda_inner<>(A, B, mask, block_size, scale, row_major_A, row_major_B,
+                                 row_major_mask);
 }
 
 template <bool RowMajorA, bool RowMajorB, bool RowMajorMask>
 torch::Tensor gemm_sdd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tensor mask,
-                                  int64_t block_size) {
+                                  int64_t block_size, float scale) {
     // Allocate output tensor (M x N)
     auto C = torch::empty({A.size(0), B.size(0)}, A.options());
 
@@ -119,22 +123,25 @@ torch::Tensor gemm_sdd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tenso
         torch_to_ct_2d<bool, std::conditional_t<RowMajorMask, ct::GenRowMajor, ct::GenColMajor>>(
             mask);
 
-    gemm_sdd<GemmConfigImpl<RowMajorA, RowMajorB>>(A_ct, B_ct, C_ct, mask_ct, block_size);
+    gemm_sdd<GemmConfigImpl<RowMajorA, RowMajorB>>(A_ct, B_ct, C_ct, mask_ct, block_size, scale);
     return C;
 }
 
 template <bool... RowMajors, typename... Ts>
 torch::Tensor gemm_sdd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tensor mask,
-                                  int64_t block_size, bool row_major, Ts... row_majors) {
+                                  int64_t block_size, float scale, bool row_major,
+                                  Ts... row_majors) {
     if (row_major) {
-        return gemm_sdd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, row_majors...);
+        return gemm_sdd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, scale,
+                                                       row_majors...);
     } else {
-        return gemm_sdd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, row_majors...);
+        return gemm_sdd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, scale,
+                                                        row_majors...);
     }
 }
 
 torch::Tensor gemm_sdd_cuda(torch::Tensor A, torch::Tensor B, torch::Tensor mask,
-                            int64_t block_size) {
+                            int64_t block_size, float scale) {
     check_operand(A);
     check_operand(B);
     check_operand(mask);
@@ -144,7 +151,8 @@ torch::Tensor gemm_sdd_cuda(torch::Tensor A, torch::Tensor B, torch::Tensor mask
     bool row_major_A = A.stride(1) == 1;
     bool row_major_B = B.stride(1) == 1;
     bool row_major_mask = mask.stride(1) == 1;
-    return gemm_sdd_cuda_inner<>(A, B, mask, block_size, row_major_A, row_major_B, row_major_mask);
+    return gemm_sdd_cuda_inner<>(A, B, mask, block_size, scale, row_major_A, row_major_B,
+                                 row_major_mask);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

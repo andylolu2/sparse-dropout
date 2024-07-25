@@ -2,11 +2,20 @@
 
 #include <cute/tensor.hpp>
 
-#include "base.cuh"
-
 namespace ct = cute;
 using ct::Int;
 
+/* GEMM configuration class: Handles the compile-time computation of the kernel parameters.
+ * Required parameters:
+ * - BLK_M, BLK_N, BLK_K: The block sizes for the GEMM operation.
+ * - GroupSizeM: The number of thread blocks in the M dimension.
+ * - NumThreads: The number of threads per thread block.
+ * - LayoutA, LayoutB, LayoutC: The layouts of A, B, and C.
+ * - SmemLayoutA, SmemLayoutB: The layouts of the shared memory blocks for A and B.
+ * - GmemCopyA, GmemCopyB, GmemCopyC: The copy operations for A, B, and C.
+ * - TiledMMA: The MMA operation.
+ * - SmemCopyA, SmemCopyB: The copy operations for A and B from shared memory to register memory.
+ */
 template <bool RowMajorA, bool RowMajorB>
 struct GemmConfigImpl {
    public:
@@ -21,10 +30,10 @@ struct GemmConfigImpl {
     using RowMajorLayout = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<int64_t, Int<1>>>;
     using ColMajorLayout = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<Int<1>, int64_t>>;
 
-   public:
-    using LayoutA = std::conditional_t<RowMajorA, RowMajorLayout, ColMajorLayout>;
-    using LayoutB = std::conditional_t<RowMajorB, RowMajorLayout, ColMajorLayout>;
-    using LayoutC = RowMajorLayout;
+//    public:
+//     using LayoutA = std::conditional_t<RowMajorA, RowMajorLayout, ColMajorLayout>;
+//     using LayoutB = std::conditional_t<RowMajorB, RowMajorLayout, ColMajorLayout>;
+//     using LayoutC = RowMajorLayout;
 
    private:
     static constexpr int AccessSizeBits = 128;
@@ -98,8 +107,3 @@ struct GemmConfigImpl {
     using SmemCopyB = decltype(ct::make_tiled_copy_B(
         std::conditional_t<RowMajorB, RowMajorSmemCopyAtom, ColMajorSmemCopyAtom>{}, TiledMMA{}));
 };
-
-static_assert(GemmConfig<GemmConfigImpl<true, true>>);
-static_assert(GemmConfig<GemmConfigImpl<true, false>>);
-static_assert(GemmConfig<GemmConfigImpl<false, true>>);
-static_assert(GemmConfig<GemmConfigImpl<false, false>>);

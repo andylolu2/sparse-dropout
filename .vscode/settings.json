@@ -96,5 +96,6 @@
     "isort.args": [
         "--settings-path",
         "${workspaceFolder}/pyproject.toml"
-    ]
+    ],
+    "cmake.sourceDirectory": "/root/sparse-dropout/flash_dropout/cuda"
 }

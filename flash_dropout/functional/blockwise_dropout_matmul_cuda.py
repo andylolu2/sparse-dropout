@@ -1,7 +1,6 @@
 import torch
 
-from flash_dropout.cuda.binding import FlashDropoutCUDA
-from flash_dropout.types import size
+from flash_dropout.cuda.binding_gemm import GEMM
 
 
 class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
@@ -11,23 +10,21 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
         ctx: torch.autograd.function.FunctionCtx,
         input: torch.Tensor,
         weight: torch.Tensor,
-        block_size: size,
+        block_size: int,
         p: float,
     ):
         assert 0 <= p < 1, "Dropout probability must be in [0, 1)"
 
-        BLK_M, BLK_K = block_size
-        BLK_N = 128
-        impl = FlashDropoutCUDA(
-            BLK_MNK_GROUP_0=(BLK_M, BLK_N, 64, 5),
-            BLK_MNK_GROUP_1=(BLK_M, 64, BLK_K, 5),
-            BLK_MNK_GROUP_2=(64, BLK_N, BLK_K, 5),
-        )
-        C, mask, mask_T, mask_table, count = impl.forward(input, weight, p)
+        M, N, K = input.shape[0], weight.shape[0], input.shape[1]
 
-        ctx.save_for_backward(input, weight, mask_T, mask_table)
-        # ctx.block_size = block_size
-        ctx.count = count  # type: ignore
+        ext = GEMM()
+        mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
+
+        # C (M N) = A (M K sparse) * B (N K)
+        C = ext.gemm_dsd(input, weight, mask, block_size)
+
+        ctx.save_for_backward(input, weight, mask)
+        ctx.block_size = block_size  # type: ignore
         ctx.p = p  # type: ignore
 
         return C
@@ -38,23 +35,23 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
         ctx: torch.autograd.function.FunctionCtx,
         grad_output: torch.Tensor,
     ):
-        input, weight, mask_T, mask_table = ctx.saved_tensors  # type: ignore
-        # BLK_M, BLK_K = ctx.block_size
-        count = ctx.count  # type: ignore
+        input, weight, mask = ctx.saved_tensors  # type: ignore
+        block_size = ctx.block_size  # type: ignore
         p = ctx.p  # type: ignore
 
-        impl = FlashDropoutCUDA(
-            BLK_MNK_GROUP_0=(128, 128, 64, 5),
-            BLK_MNK_GROUP_1=(128, 64, 128, 5),
-            BLK_MNK_GROUP_2=(64, 128, 128, 5),
-        )
-        grad_input = impl.backward_dA(grad_output, weight, mask_table, p, count)
-        grad_weight = impl.backward_dB(grad_output, input, mask_T, p)
+        ext = GEMM()
+        # dA (M K sparse) = dC (M N) * B.T (K N)
+        grad_input = ext.gemm_sdd(grad_output, weight.T, mask, block_size)
+        # dB (N K) = dC.T (N M) * A.T (K M sparse)
+        #          = (A.T (K M sparse) * dC.T (N M)).T
+        grad_weight = ext.gemm_dsd(input.T, grad_output.T, mask.T, block_size).T
+        # grad_input = impl.backward_dA(grad_output, weight, mask_table, p, count)
+        # grad_weight = impl.backward_dB(grad_output, input, mask_T, p)
 
         return grad_input, grad_weight, None, None
 
 
 def blockwise_dropout_matmul(
-    input: torch.Tensor, weight: torch.Tensor, block_size: size, p: float
+    input: torch.Tensor, weight: torch.Tensor, block_size: int, p: float
 ) -> torch.Tensor:
     return BlockwiseDropoutMatmulCUDA.apply(input, weight, block_size, p)  # type: ignore

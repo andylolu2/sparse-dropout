@@ -2,8 +2,6 @@
 
 #include <cute/tensor.hpp>
 
-#include "gemm_configs/base.cuh"
-
 namespace ct = cute;
 
 // Define some useful aliases
@@ -14,11 +12,9 @@ using Gmem = ct::ViewEngine<ct::gmem_ptr<T *>>;
 template <typename T>
 using Smem = ct::ViewEngine<ct::smem_ptr<T *>>;
 
-template <GemmConfig Config>
+template <typename Config, typename LayoutBlkC>
 struct SmemGemm {
    private:
-    using StrideC = std::remove_reference_t<decltype((typename Config::LayoutC{}).stride())>;
-    using LayoutBlkC = ct::Layout<ct::Shape<Int<Config::BLK_M>, Int<Config::BLK_N>>, StrideC>;
     ct::Tensor<Gmem<ct::half_t>, LayoutBlkC> &C;
     typename Config::TiledMMA tiled_mma;
     typename Config::SmemCopyA smem_tiled_copy_A;
@@ -57,15 +53,16 @@ struct SmemGemm {
 
         // Perform GEMM
         ct::gemm(tiled_mma, A_frag, B_frag, C_frag);
+
+        // Wait until all threads have finished using sA and sB
+        __syncthreads();
     }
 
     // Write back result to gmem
     __device__ void write_back() {
         auto C_frag_out = thread_mma.partition_C(C);  // Corresponding location in output tensor
         ct::copy(gmem_copy_C, C_frag, C_frag_out);
-#if defined(CUTE_ARCH_CP_ASYNC_SM80_ENABLED)
         ct::cp_async_wait<0>();
-#endif
     }
 };
 
@@ -77,12 +74,11 @@ __device__ void load_block_from_gmem_to_smem(const ct::Tensor<Gmem<T>, SrcLayout
     auto src_frag = thread_copy.partition_S(src);
     auto dst_frag = thread_copy.partition_D(dst);
     ct::copy(tiled_copy, src_frag, dst_frag);
-#if defined(CUTE_ARCH_CP_ASYNC_SM80_ENABLED)
     ct::cp_async_wait<0>();
-#endif
 }
 
-__device__ std::tuple<int, int> threadblock_swizzle(int idx, int m, int n, int group_size_m) {
+__device__ std::tuple<int64_t, int64_t> threadblock_swizzle(int64_t idx, int64_t m, int64_t n,
+                                                            int64_t group_size_m) {
     // Reordering the block access pattern helps to improve L2 cache hit rate.
     // Triton's doc for matmul has a nice explanation:
     // https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html For m =
@@ -90,20 +86,20 @@ __device__ std::tuple<int, int> threadblock_swizzle(int idx, int m, int n, int g
     //  |  1 |  3 |  5 |  7 |
     //  |  2 |  4 |  6 |  8 |
     //  |  9 | 10 | 11 | 12 |
-    int blocks_per_group = group_size_m * n;
-    int first_block_idx_m = (idx / blocks_per_group) * group_size_m;
+    int64_t blocks_per_group = group_size_m * n;
+    int64_t first_block_idx_m = (idx / blocks_per_group) * group_size_m;
     group_size_m = min(m - first_block_idx_m,
                        group_size_m);  // Min to handle edge case of m % group_size_m != 0
-    int block_idx_m = first_block_idx_m + (idx % group_size_m);
-    int block_idx_n = (idx % blocks_per_group) / group_size_m;
+    int64_t block_idx_m = first_block_idx_m + (idx % group_size_m);
+    int64_t block_idx_n = (idx % blocks_per_group) / group_size_m;
     return std::make_tuple(block_idx_m, block_idx_n);
 }
 
 // Main kernel
-template <GemmConfig Config>
-__global__ void gemm_kernel(ct::Tensor<Gmem<ct::half_t>, typename Config::LayoutA> A,
-                            ct::Tensor<Gmem<ct::half_t>, typename Config::LayoutB> B,
-                            ct::Tensor<Gmem<ct::half_t>, typename Config::LayoutC> C) {
+template <typename Config, typename LayoutA, typename LayoutB, typename LayoutC>
+__global__ void gemm_kernel(ct::Tensor<Gmem<ct::half_t>, LayoutA> A,
+                            ct::Tensor<Gmem<ct::half_t>, LayoutB> B,
+                            ct::Tensor<Gmem<ct::half_t>, LayoutC> C) {
     // Threadblock-level paratitioning
     auto [block_idx_m, block_idx_n] =
         threadblock_swizzle(blockIdx.x, ct::size<0>(A) / Config::BLK_M,
@@ -129,12 +125,13 @@ __global__ void gemm_kernel(ct::Tensor<Gmem<ct::half_t>, typename Config::Layout
     // Main loop
     typename Config::GmemCopyA gmem_copy_A;
     typename Config::GmemCopyB gmem_copy_B;
-    SmemGemm<Config> smem_gemm(C_blk);
+    SmemGemm<Config, std::decay_t<decltype(C_blk.layout())>> smem_gemm(C_blk);
     for (size_t k = 0; k < ct::size<2>(A_blk); k++) {
         // Load the k-th A block from gmem to smem
         load_block_from_gmem_to_smem(A_blk(_, _, k), sA, gmem_copy_A);
         // Load the k-th B block from gmem to smem
         load_block_from_gmem_to_smem(B_blk(_, _, k), sB, gmem_copy_B);
+        // Wait until all threads have finished loading A and B
         __syncthreads();
         smem_gemm(sA, sB);
     }
@@ -142,10 +139,10 @@ __global__ void gemm_kernel(ct::Tensor<Gmem<ct::half_t>, typename Config::Layout
 }
 
 // Host interface
-template <GemmConfig Config>
-void gemm(const ct::Tensor<Gmem<ct::half_t>, typename Config::LayoutA> &A,
-          const ct::Tensor<Gmem<ct::half_t>, typename Config::LayoutB> &B,
-          const ct::Tensor<Gmem<ct::half_t>, typename Config::LayoutC> &C) {
+template <typename Config, typename LayoutA, typename LayoutB, typename LayoutC>
+void gemm(const ct::Tensor<Gmem<ct::half_t>, LayoutA> &A,
+          const ct::Tensor<Gmem<ct::half_t>, LayoutB> &B,
+          const ct::Tensor<Gmem<ct::half_t>, LayoutC> &C) {
     assert(ct::size<0>(A) == ct::size<0>(C));  // M
     assert(ct::size<0>(B) == ct::size<1>(C));  // N
     assert(ct::size<1>(A) == ct::size<1>(B));  // K

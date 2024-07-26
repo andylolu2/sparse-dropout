@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 
+import cuda.cudart
 import lightning as L
 import matplotlib.pyplot as plt
 import numpy as np
@@ -47,7 +48,7 @@ def f_baseline(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor, p: float):
 
 
 def f_dense_cuda(A: torch.Tensor, B: torch.Tensor, dC: torch.Tensor):
-    ext = GEMM()
+    ext = GEMM(verbose=True)
     C = ext.gemm(A, B)
     yield C
 
@@ -109,7 +110,10 @@ def do_bench_detailed(fn, warmup: int = 10, rep: float = 0.5):
     for _ in fn():
         n_breakpoints += 1
 
-    cache = torch.empty(4 * 1024**2, dtype=torch.int8, device="cuda")
+    _, l2_size = cuda.cudart.cudaDeviceGetAttribute(
+        cuda.cudart.cudaDeviceAttr.cudaDevAttrL2CacheSize, 0
+    )
+    cache = torch.empty(l2_size, dtype=torch.int8, device="cuda")
 
     for _ in range(warmup):
         cache.zero_()
@@ -156,9 +160,9 @@ if __name__ == "__main__":
     # M, N, K = b * s, d * 4, d
     # M, N, K = b * s, d, d * 4
     # M, N, K = b * s, d, 3 * d
-    # M, N, K = 1024, 1024, 1024
+    M, N, K = 1024, 1024, 1024
     # M, N, K = 2048, 2048, 2048
-    M, N, K = 4096, 4096, 4096
+    # M, N, K = 4096, 4096, 4096
 
     A = torch.randn((M, K), device="cuda", dtype=torch.float16, requires_grad=True)
     B = torch.randn((N, K), device="cuda", dtype=torch.float16, requires_grad=True)
@@ -249,6 +253,7 @@ if __name__ == "__main__":
         )
         ax.set(
             xlim=(-0.02, 1.02),
+            ylim=(0, None),
             ylabel="Time (ms)",
             xlabel="Sparsity",
         )
@@ -281,6 +286,7 @@ if __name__ == "__main__":
         )
         ax.set(
             xlim=(-0.02, 1.02),
+            ylim=(0, None),
             ylabel="FLOPS",
             xlabel="Sparsity",
         )

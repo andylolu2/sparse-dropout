@@ -1,6 +1,6 @@
-#include <cute/tensor.hpp>
-//
 #include <torch/extension.h>
+
+#include <cute/tensor.hpp>
 
 #include "gemm.cuh"
 #include "gemm_configs/gemm_config.cuh"
@@ -26,12 +26,8 @@ torch::Tensor gemm_cuda_inner(torch::Tensor A, torch::Tensor B) {
     // Allocate output tensor (M x N)
     auto C = torch::empty({A.size(0), B.size(0)}, A.options());
 
-    auto A_ct =
-        torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorA, ct::GenRowMajor, ct::GenColMajor>>(
-            A);
-    auto B_ct =
-        torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorB, ct::GenRowMajor, ct::GenColMajor>>(
-            B);
+    auto A_ct = torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorA, ct::GenRowMajor, ct::GenColMajor>>(A);
+    auto B_ct = torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorB, ct::GenRowMajor, ct::GenColMajor>>(B);
     auto C_ct = torch_to_ct_2d<ct::half_t, ct::GenRowMajor>(C);
 
     gemm<GemmConfigImpl<RowMajorA, RowMajorB>>(A_ct, B_ct, C_ct);
@@ -63,16 +59,10 @@ torch::Tensor gemm_dsd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tenso
     // Allocate output tensor (M x N)
     auto C = torch::empty({A.size(0), B.size(0)}, A.options());
 
-    auto A_ct =
-        torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorA, ct::GenRowMajor, ct::GenColMajor>>(
-            A);
-    auto B_ct =
-        torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorB, ct::GenRowMajor, ct::GenColMajor>>(
-            B);
+    auto A_ct = torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorA, ct::GenRowMajor, ct::GenColMajor>>(A);
+    auto B_ct = torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorB, ct::GenRowMajor, ct::GenColMajor>>(B);
     auto C_ct = torch_to_ct_2d<ct::half_t, ct::GenRowMajor>(C);
-    auto mask_ct =
-        torch_to_ct_2d<bool, std::conditional_t<RowMajorMask, ct::GenRowMajor, ct::GenColMajor>>(
-            mask);
+    auto mask_ct = torch_to_ct_2d<bool, std::conditional_t<RowMajorMask, ct::GenRowMajor, ct::GenColMajor>>(mask);
 
     gemm_dsd<GemmConfigImpl<RowMajorA, RowMajorB>>(A_ct, B_ct, C_ct, mask_ct, block_size, scale);
     return C;
@@ -83,11 +73,9 @@ torch::Tensor gemm_dsd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tenso
                                   int64_t block_size, float scale, bool row_major,
                                   Ts... row_majors) {
     if (row_major) {
-        return gemm_dsd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, scale,
-                                                       row_majors...);
+        return gemm_dsd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, scale, row_majors...);
     } else {
-        return gemm_dsd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, scale,
-                                                        row_majors...);
+        return gemm_dsd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, scale, row_majors...);
     }
 }
 
@@ -102,8 +90,7 @@ torch::Tensor gemm_dsd_cuda(torch::Tensor A, torch::Tensor B, torch::Tensor mask
     bool row_major_A = A.stride(1) == 1;
     bool row_major_B = B.stride(1) == 1;
     bool row_major_mask = mask.stride(1) == 1;
-    return gemm_dsd_cuda_inner<>(A, B, mask, block_size, scale, row_major_A, row_major_B,
-                                 row_major_mask);
+    return gemm_dsd_cuda_inner<>(A, B, mask, block_size, scale, row_major_A, row_major_B, row_major_mask);
 }
 
 template <bool RowMajorA, bool RowMajorB, bool RowMajorMask>
@@ -112,16 +99,10 @@ torch::Tensor gemm_sdd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tenso
     // Allocate output tensor (M x N)
     auto C = torch::empty({A.size(0), B.size(0)}, A.options());
 
-    auto A_ct =
-        torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorA, ct::GenRowMajor, ct::GenColMajor>>(
-            A);
-    auto B_ct =
-        torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorB, ct::GenRowMajor, ct::GenColMajor>>(
-            B);
+    auto A_ct = torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorA, ct::GenRowMajor, ct::GenColMajor>>(A);
+    auto B_ct = torch_to_ct_2d<ct::half_t, std::conditional_t<RowMajorB, ct::GenRowMajor, ct::GenColMajor>>(B);
     auto C_ct = torch_to_ct_2d<ct::half_t, ct::GenRowMajor>(C);
-    auto mask_ct =
-        torch_to_ct_2d<bool, std::conditional_t<RowMajorMask, ct::GenRowMajor, ct::GenColMajor>>(
-            mask);
+    auto mask_ct = torch_to_ct_2d<bool, std::conditional_t<RowMajorMask, ct::GenRowMajor, ct::GenColMajor>>(mask);
 
     gemm_sdd<GemmConfigImpl<RowMajorA, RowMajorB>>(A_ct, B_ct, C_ct, mask_ct, block_size, scale);
     return C;
@@ -132,11 +113,9 @@ torch::Tensor gemm_sdd_cuda_inner(torch::Tensor A, torch::Tensor B, torch::Tenso
                                   int64_t block_size, float scale, bool row_major,
                                   Ts... row_majors) {
     if (row_major) {
-        return gemm_sdd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, scale,
-                                                       row_majors...);
+        return gemm_sdd_cuda_inner<RowMajors..., true>(A, B, mask, block_size, scale, row_majors...);
     } else {
-        return gemm_sdd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, scale,
-                                                        row_majors...);
+        return gemm_sdd_cuda_inner<RowMajors..., false>(A, B, mask, block_size, scale, row_majors...);
     }
 }
 

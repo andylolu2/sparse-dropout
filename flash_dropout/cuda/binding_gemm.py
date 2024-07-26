@@ -1,7 +1,10 @@
+from functools import cache
+
 import torch
 from torch.utils.cpp_extension import load
 
 
+@cache
 class GEMM:
     def __init__(self, verbose: bool = False):
         """Load and JIT compile the extension module"""
@@ -14,6 +17,7 @@ class GEMM:
                 "flash_dropout/cuda/cutlass/include",
             ],
             extra_cuda_cflags=[
+                "-O3",
                 "-keep",
             ],
             verbose=verbose,
@@ -81,11 +85,11 @@ if __name__ == "__main__":
 
     #     compare(C, C_ref)
 
-    M, N, K = 512, 512, 512
+    # M, N, K = 512, 512, 512
     # M, N, K = 1024, 1024, 512
-    # M, N, K = 2048, 2048, 2048
+    M, N, K = 2048, 2048, 2048
     block_size = 128
-    p = 0.1
+    p = 0.2
     mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
     # mask = torch.zeros(
     #     M // block_size, K // block_size, device="cuda", dtype=torch.bool
@@ -99,16 +103,21 @@ if __name__ == "__main__":
     ]:
         A = make_tensor(M, K, row_major=a_row_major)
         B = make_tensor(N, K, row_major=b_row_major)
+        print(f"A ({tuple(A.shape)}:{A.stride()}) B ({tuple(B.shape)}:{B.stride()})")
+
+        print("GEMM")
+        C = ext.gemm(A, B)
+        C_ref = A.float() @ B.float().T
+        compare(C, C_ref)
+        print()
 
         print("DSD")
-        print(f"A ({tuple(A.shape)}:{A.stride()}) B ({tuple(B.shape)}:{B.stride()})")
         C = ext.gemm_dsd(A, B, mask, block_size, 1 / (1 - p))
         C_ref = blockwise_dropout_matmul_mask(A.float(), mask, block_size, p, B.float())
         compare(C, C_ref)
         print()
 
         print("SDD")
-        print(f"A ({tuple(A.shape)}:{A.stride()}) B ({tuple(B.shape)}:{B.stride()})")
         C = ext.gemm_sdd(A, B, mask, block_size, 1 / (1 - p))
         C_ref = (
             (A.float() @ B.float().T)

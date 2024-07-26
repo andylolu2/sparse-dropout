@@ -23,19 +23,12 @@ struct GemmConfigImpl {
     static constexpr int64_t BLK_M = 128;
     static constexpr int64_t BLK_N = 128;
     static constexpr int64_t BLK_K = 64;
-    static constexpr int64_t GroupSizeM = 5;    // Generally want to choose ~= sqrt(no. of SMs).
     static constexpr int64_t NumThreads = 128;  // 4 warps
 
    private:
     using RowMajorLayout = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<int64_t, Int<1>>>;
     using ColMajorLayout = ct::Layout<ct::Shape<int64_t, int64_t>, ct::Stride<Int<1>, int64_t>>;
 
-    //    public:
-    //     using LayoutA = std::conditional_t<RowMajorA, RowMajorLayout, ColMajorLayout>;
-    //     using LayoutB = std::conditional_t<RowMajorB, RowMajorLayout, ColMajorLayout>;
-    //     using LayoutC = RowMajorLayout;
-
-   private:
     static constexpr int AccessSizeBits = 128;
     static constexpr int ElemsPerLoad = AccessSizeBits / ct::sizeof_bits_v<ct::half_t>;
     static constexpr int SmemAtomInner = std::min(64, static_cast<int>(BLK_K));
@@ -65,8 +58,7 @@ struct GemmConfigImpl {
         BlockShapeB{}));
 
    private:
-    using GmemCopyAtom =
-        ct::Copy_Atom<ct::AutoVectorizingCopyWithAssumedAlignment<AccessSizeBits>, ct::half_t>;
+    using GmemCopyAtom = ct::Copy_Atom<ct::SM80_CP_ASYNC_CACHEALWAYS<ct::uint128_t>, ct::half_t>;
     using RowMajorGmemCopy = decltype(ct::make_tiled_copy(
         GmemCopyAtom{},
         ct::Layout<ct::Shape<Int<NumThreads / ThreadsPerRow>, Int<ThreadsPerRow>>,
@@ -81,7 +73,6 @@ struct GemmConfigImpl {
    public:
     using GmemCopyA = std::conditional_t<RowMajorA, RowMajorGmemCopy, ColMajorGmemCopy>;
     using GmemCopyB = std::conditional_t<RowMajorB, RowMajorGmemCopy, ColMajorGmemCopy>;
-    using GmemCopyC = GmemCopyAtom;
 
    private:
     // The atom of the smem -> rmem copy for A/B. Loads 4 8x8 matrices (distributed across threads)

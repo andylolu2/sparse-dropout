@@ -4,6 +4,7 @@
 
 #include "gemm.cuh"
 #include "gemm_configs/gemm_config.cuh"
+#include "make_mask.cuh"
 #include "matmul_dsd.cuh"
 #include "matmul_sdd.cuh"
 
@@ -138,4 +139,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("gemm", &gemm_cuda);
     m.def("gemm_dsd", &gemm_dsd_cuda);
     m.def("gemm_sdd", &gemm_sdd_cuda);
+    m.def("make_mask", &make_mask);
 }

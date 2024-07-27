@@ -1,6 +1,7 @@
 import torch
 
 from flash_dropout.cuda.binding_gemm import GEMM
+from flash_dropout.functional.utils import blockwise_dropout_mask
 
 
 class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
@@ -15,10 +16,11 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
     ):
         assert 0 <= p < 1, "Dropout probability must be in [0, 1)"
 
-        M, N, K = input.shape[0], weight.shape[0], input.shape[1]
+        # M, N, K = input.shape[0], weight.shape[0], input.shape[1]
 
         ext = GEMM()
-        mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
+        # mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
+        mask = blockwise_dropout_mask(input, block_size, p)
 
         # C (M N) = A (M K sparse) * B (N K)
         C = ext.gemm_dsd(input, weight, mask, block_size, 1 / (1 - p))
@@ -47,8 +49,6 @@ class BlockwiseDropoutMatmulCUDA(torch.autograd.Function):
         grad_weight = ext.gemm_dsd(
             input.T, grad_output.T, mask.T, block_size, 1 / (1 - p)
         ).T
-        # grad_input = impl.backward_dA(grad_output, weight, mask_table, p, count)
-        # grad_weight = impl.backward_dB(grad_output, input, mask_T, p)
 
         return grad_input, grad_weight, None, None
 

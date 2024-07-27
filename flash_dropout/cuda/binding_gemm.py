@@ -46,6 +46,9 @@ class GEMM:
     ) -> torch.Tensor:
         return self.ext.gemm_sdd(A, B, mask, block_size, scale)  # type: ignore
 
+    def make_mask(self, m: int, n: int, block_size: int, p: float) -> torch.Tensor:
+        return self.ext.make_mask(m, n, block_size, p)  # type: ignore
+
 
 if __name__ == "__main__":
     import lightning as L
@@ -90,7 +93,8 @@ if __name__ == "__main__":
     M, N, K = 2048, 2048, 2048
     block_size = 128
     p = 0.2
-    mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
+    mask = ext.make_mask(M, K, block_size, p)
+    # mask = torch.rand(M // block_size, K // block_size, device="cuda") < p
     # mask = torch.zeros(
     #     M // block_size, K // block_size, device="cuda", dtype=torch.bool
     # )

@@ -12,8 +12,7 @@ import torch
 import torch.types
 
 import flash_dropout.functional as F
-from benchmark.benchmarker import Benchmarker
-from benchmark.common import make_tensor
+from benchmark.utils import Benchmarker, make_tensor
 from flash_dropout.cuda.binding_gemm import GEMM
 from flash_dropout.functional.blockwise_dropout_matmul_cuda import (
     blockwise_dropout_matmul as blockwise_dropout_matmul_cuda,

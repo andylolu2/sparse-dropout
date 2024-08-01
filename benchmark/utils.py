@@ -9,6 +9,17 @@ import torch
 BenchmarkFn: TypeAlias = Callable[[], Iterator[str]]
 
 
+def make_tensor(*size: int, row_major: bool = True, requires_grad: bool = True):
+    if row_major:
+        return torch.randn(
+            size, device="cuda", dtype=torch.float16, requires_grad=requires_grad
+        )
+    else:
+        return torch.randn(
+            size[::-1], device="cuda", dtype=torch.float16, requires_grad=requires_grad
+        ).T
+
+
 class GpuTimer:
     def __init__(self):
         self.start = torch.cuda.Event(enable_timing=True)
@@ -59,6 +70,8 @@ class Benchmarker:
                     pass
 
     def _benchmark_once(self):
+        torch.cuda._sleep(1_000_000)  # give the host some time to saturate the GPU
+        timers = defaultdict(dict)
         for fn_name, fn in self.fns.items():
             self.cache.zero_()
             iterator = iter(fn())
@@ -66,9 +79,13 @@ class Benchmarker:
                 try:
                     with GpuTimer() as timer:
                         breakpoint_name = next(iterator)
-                    self.timings[fn_name][breakpoint_name].append(timer.elapsed_time())
+                    timers[fn_name][breakpoint_name] = timer
                 except StopIteration:
                     break
+        # Store the measured times (implicitly synchrnoises)
+        for fn_name, breakpoints in timers.items():
+            for breakpoint_name, timer in breakpoints.items():
+                self.timings[fn_name][breakpoint_name].append(timer.elapsed_time())
 
     def run(self):
         self._warmup()
@@ -83,7 +100,6 @@ class Benchmarker:
         data = []
         for fn_name, breakpoints in self.timings.items():
             for breakpoint_name, times in breakpoints.items():
-                times = torch.tensor(times)
                 data.append(
                     {
                         "method": fn_name,

@@ -14,3 +14,4 @@ seaborn~=0.13
 scienceplots~=2.1
 einops~=0.7
 pytest~=7.4
+cuda-python~=12.5

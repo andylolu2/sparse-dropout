@@ -11,8 +11,7 @@ import seaborn as sns
 import torch
 import torch.types
 
-from benchmark.benchmarker import Benchmarker
-from benchmark.common import make_tensor
+from benchmark.utils import Benchmarker, make_tensor
 from flash_dropout.cuda.binding_gemm import GEMM
 from flash_dropout.functional.utils import blockwise_dropout_mask
 
